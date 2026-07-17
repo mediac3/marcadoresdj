@@ -155,13 +155,13 @@ Abre [http://localhost:3000](http://localhost:3000).
 
 ### Credenciales por defecto (tras el seed)
 
-| Campo    | Valor          |
-| -------- | -------------- |
-| Usuario  | `1038796568`   |
-| Password | `1038796568`   |
-| Rol      | `ADMIN`        |
+| Campo    | Valor                            |
+| -------- | -------------------------------- |
+| Usuario  | `admin`                          |
+| Password | `admin-password-change-me`       |
+| Rol      | `ADMIN`                          |
 
-> ⚠️ **Cambia estas credenciales inmediatamente en producción** creando un nuevo admin y eliminando o desactivando el usuario por defecto.
+> ⚠️ **Cambia estas credenciales inmediatamente en producción** configurando las variables de entorno `SEED_ADMIN_USERNAME`, `SEED_ADMIN_PASSWORD` y `SEED_ADMIN_NAME` antes de ejecutar el seed, o creando un nuevo admin y eliminando el usuario por defecto desde el panel.
 
 ---
 
@@ -225,9 +225,18 @@ bunx prisma studio   # GUI para inspeccionar la BD en http://localhost:5555
 
 El seed (`prisma/seed.ts`) crea:
 
-- Usuario admin (`1038796568` / `1038796568`)
+- Usuario admin (credenciales configurables via env vars, ver abajo)
 - Deportes: Fútbol, Baloncesto, Microfútbol
 - Acciones por deporte (Gol, Amarilla, Roja, Cambio, Canasta, Triple, etc.)
+
+Para personalizar las credenciales del admin en el seed:
+
+```bash
+SEED_ADMIN_USERNAME="mi-admin" \
+SEED_ADMIN_PASSWORD="password-seguro-aqui" \
+SEED_ADMIN_NAME="Mi Nombre" \
+bunx prisma db seed
+```
 
 ---
 

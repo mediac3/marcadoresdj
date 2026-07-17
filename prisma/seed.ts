@@ -7,19 +7,35 @@ async function seed() {
   console.log('🌱 Seeding MarcadoresDJ...');
 
   // 1. Create admin user
-  const hashedPassword = await bcrypt.hash('1038796568', 10);
+  // Credenciales configurables via env vars para entornos productivos.
+  // Defaults solo aptos para desarrollo local.
+  const ADMIN_USERNAME = process.env.SEED_ADMIN_USERNAME || 'admin';
+  const ADMIN_PASSWORD =
+    process.env.SEED_ADMIN_PASSWORD || 'admin-password-change-me';
+  const ADMIN_NAME = process.env.SEED_ADMIN_NAME || 'Administrador';
+
+  const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
   const admin = await prisma.user.upsert({
-    where: { username: '1038796568' },
+    where: { username: ADMIN_USERNAME },
     update: {},
     create: {
-      username: '1038796568',
+      username: ADMIN_USERNAME,
       password: hashedPassword,
       role: 'ADMIN',
-      name: 'Administrador',
+      name: ADMIN_NAME,
       isActive: true,
     },
   });
   console.log('✅ Admin user created:', admin.username);
+  if (
+    !process.env.SEED_ADMIN_PASSWORD &&
+    process.env.NODE_ENV === 'production'
+  ) {
+    console.warn(
+      '⚠️  WARNING: Usando password por defecto en producción. ' +
+        'Configura SEED_ADMIN_PASSWORD para sobreescribirlo.'
+    );
+  }
 
   // 2. Create Sports
   const futbol = await prisma.sport.upsert({

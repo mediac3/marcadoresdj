@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — MarcadoresDJ
+# Orquestación local para desarrollo y producción.
+#
+# Uso:
+#   docker compose up -d            # Inicia en background
+#   docker compose logs -f          # Ver logs
+#   docker compose down             # Detener
+#   docker compose up --build       # Re-build y reiniciar
+#
+# Antes del primer arranque, copia .env.example a .env y ajusta JWT_SECRET:
+#   cp .env.example .env
+#   # Genera un secreto fuerte: openssl rand -base64 48
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  marcadoresdj:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: marcadoresdj:latest
+    container_name: marcadoresdj
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: "file:/app/db/custom.db"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET es obligatorio. Copia .env.example a .env y ajusta el valor.}"
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      # Persiste la BD SQLite entre reinicios del container
+      - marcadoresdj_db:/app/db
+      # Persiste logos y archivos subidos
+      - marcadoresdj_uploads:/app/public/uploads
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/public/events').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - marcadoresdj-net
+
+# Descomenta este bloque si quieres PostgreSQL en lugar de SQLite
+#  postgres:
+#    image: postgres:16-alpine
+#    container_name: marcadoresdj_pg
+#    restart: unless-stopped
+#    environment:
+#      POSTGRES_DB: marcadoresdj
+#      POSTGRES_USER: marcadoresdj
+#      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+#    volumes:
+#      - postgres_data:/var/lib/postgresql/data
+#    ports:
+#      - "5432:5432"
+#    networks:
+#      - marcadoresdj-net
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U marcadoresdj"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+
+networks:
+  marcadoresdj-net:
+    driver: bridge
+
+volumes:
+  marcadoresdj_db:
+    driver: local
+  marcadoresdj_uploads:
+    driver: local
+#  postgres_data:
+#    driver: local

@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .dockerignore — MarcadoresDJ
+# Reduce el contexto de build de Docker eliminando archivos innecesarios.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Dependencias (se instalan dentro del container)
+node_modules/
+**/node_modules/
+
+# Build artifacts
+.next/
+out/
+build/
+dist/
+standalone/
+
+# DB local (no se incluye en la imagen, se inicializa en runtime)
+db/*.db
+db/*.db-journal
+db/*.db-shm
+db/*.db-wal
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dev.log
+dev.out.log
+server.log
+
+# Env files (solo .env.example se copia manualmente si se necesita)
+.env
+.env.*
+!.env.example
+
+# IDEs / editores
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Tests y coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Caches
+.cache/
+.eslintcache
+.turbo/
+*.tsbuildinfo
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# CI
+.github/
+
+# Documentación (no necesaria en runtime)
+README.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+LICENSE
+docs/
+
+# Scripts del agente
+.zscripts/
+tool-results/
+upload/
+download/
+agent-ctx/
+examples/
+worklog.md
+skills/
+
+# PID y runtime
+.server.pid
+*.pid
+*.seed
+
+# Mini-services build outputs
+mini-services/*/dist/
+mini-services/*/node_modules/

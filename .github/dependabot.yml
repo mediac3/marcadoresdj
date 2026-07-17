@@ -1,0 +1,62 @@
+# Dependabot — Actualizaciones automáticas de dependencias
+# Documentación: https://docs.github.com/en/code-security/dependabot
+
+version: 2
+updates:
+  # Dependencias de npm
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: America/Bogota
+    open-pull-requests-limit: 10
+    target-branch: main
+    labels:
+      - dependencies
+      - npm
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      # Agrupa actualizaciones de parche y minor
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+      # Mayores por separado para revisión manual
+      major:
+        update-types:
+          - major
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: America/Bogota
+    open-pull-requests-limit: 5
+    target-branch: main
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # Docker (si se agrega Dockerfile)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    target-branch: main
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: build
+      include: scope

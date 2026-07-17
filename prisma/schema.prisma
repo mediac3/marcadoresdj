@@ -1,0 +1,357 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  role      String   @default("INITIATOR") // ADMIN, CREATOR, INITIATOR
+  name      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  eventsCreated     Event[]       @relation("EventCreator")
+  publicationsCreated Publication[] @relation("PublicationCreator")
+  adsCreated        Ad[]         @relation("AdCreator")
+  eventActions      EventAction[]
+  comments          Comment[]
+  eventAccessEntries EventAccess[]  @relation("UserEventAccess")
+  tournamentsCreated  Tournament[]  @relation("TournamentCreator")
+}
+
+model Sport {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  icon      String
+  isActive  Boolean        @default(true)
+  actions   SportAction[]
+  events    Event[]
+  teams     Team[]
+  tournaments Tournament[]  @relation("TournamentSport")
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model SportAction {
+  id          String   @id @default(cuid())
+  name        String
+  label       String   // Display label: "Gol", "Amarilla", etc.
+  icon        String   // Emoji or icon identifier
+  color       String   @default("#ffffff")
+  sortOrder   Int      @default(0)
+  defaultValue Int     @default(1) // Points value per click (1 = default, 2 = canasta, 3 = triple, etc.)
+  sportId     String
+  sport       Sport    @relation(fields: [sportId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([name, sportId])
+}
+
+model Team {
+  id           String    @id @default(cuid())
+  name         String
+  shortName    String?
+  logo         String?
+  sportId      String
+  sport        Sport     @relation(fields: [sportId], references: [id])
+  gender       String    @default("Mixto")      // Masculino, Femenino, Mixto
+  ageCategory  String    @default("Libre")      // Juvenil, Junior, Sub-15, Sub-17, Sub-20, Senior, Libre
+  players      Player[]
+  eventsA      Event[]   @relation("TeamA")
+  eventsB      Event[]   @relation("TeamB")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Player {
+  id          String   @id @default(cuid())
+  name        String
+  number      Int
+  position    String
+  photo       String?
+  nickname    String?
+  birthDate   String?
+  nationality String?
+  height      String?
+  weight      String?
+  teamId      String
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  eventActions EventAction[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Country {
+  id        String       @id @default(cuid())
+  name      String       @unique
+  code      String?      @unique // ISO 3166-1 alpha-2, e.g. "CO"
+  departments Department[]
+  events    Event[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String
+  countryId String
+  country   Country  @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  cities    City[]
+  events    Event[]
+
+  @@unique([name, countryId])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model City {
+  id           String     @id @default(cuid())
+  name         String
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  events       Event[]
+
+  @@unique([name, departmentId])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Event {
+  id             String    @id @default(cuid())
+  name           String?
+  sportId        String
+  sport          Sport     @relation(fields: [sportId], references: [id])
+  teamAId        String
+  teamA          Team      @relation("TeamA", fields: [teamAId], references: [id])
+  teamBId        String
+  teamB          Team      @relation("TeamB", fields: [teamBId], references: [id])
+  location       String?   // Venue name (e.g. "Estadio Municipal")
+  countryId      String?
+  country        Country?  @relation(fields: [countryId], references: [id])
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  cityId         String?
+  city           City?    @relation(fields: [cityId], references: [id])
+  scheduledAt    DateTime?
+  startedAt      DateTime?
+  endedAt        DateTime?
+  status         String    @default("SCHEDULED") // SCHEDULED, LIVE, PAUSED, FINISHED
+  currentHalf    String?   // "1", "2", "1H", "2H", "OT", "PT"
+  elapsedSeconds Int       @default(0) // total elapsed seconds for timer
+  scoreA         Int       @default(0)
+  scoreB         Int       @default(0)
+  streamingUrl   String?
+  streamingKey   String?
+  isPublic       Boolean   @default(true)
+  // Legacy flat tournament fields (kept for backward compat)
+  tournamentName  String?               // e.g. "Copa DJ 2026"
+  phase          String?               // Eliminatoria, Cuartos de Final, Semifinal, Final, Tercer Puesto
+  phaseOrder     Int      @default(0)   // sorting order for phases
+  // New relational tournament fields
+  tournamentPhaseId String?
+  tournamentPhase TournamentPhase? @relation(fields: [tournamentPhaseId], references: [id], onDelete: SetNull)
+  // Bracket linkage: which previous event feeds into this slot
+  homeSourceEventId String?
+  homeSourceEvent   Event?    @relation("EventBracketHome", fields: [homeSourceEventId], references: [id], onDelete: SetNull)
+  awaySourceEventId String?
+  awaySourceEvent   Event?    @relation("EventBracketAway", fields: [awaySourceEventId], references: [id], onDelete: SetNull)
+  // Reverse bracket links: events that this event feeds into
+  homeFeedEvents    Event[]   @relation("EventBracketHome")
+  awayFeedEvents    Event[]   @relation("EventBracketAway")
+  createdById    String
+  createdBy      User      @relation("EventCreator", fields: [createdById], references: [id])
+  actions        EventAction[]
+  comments       Comment[]
+  eventAccessEntries EventAccess[]  @relation("EventAccessEntry")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model EventAction {
+  id        String   @id @default(cuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  playerId  String?
+  player    Player?  @relation(fields: [playerId], references: [id], onDelete: SetNull)
+  actionType String  // references SportAction.name
+  actionLabel String // snapshot of the label at action time
+  actionIcon  String // snapshot of the icon at action time
+  actionColor String // snapshot of the color at action time
+  minute     Int?    // match minute when action occurred
+  value      Int     @default(1) // count for this action
+  half       String? // which half
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  content   String
+  isAI      Boolean  @default(false)
+  actionId  String?  // link to the action that triggered this comment
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   ADVERTISING
+   ════════════════════════════════════════════════════════════════════════════ */
+
+model Ad {
+  id              String    @id @default(cuid())
+  title           String                                      // Internal name for admin
+  adType          String                                      // "text", "image", "video"
+  content         String                                      // Text content, image URL, or video URL
+  position        String    @default("bottom")                // "top", "bottom", "left", "right"
+  linkUrl         String?                                     // Click-through URL
+  orientation     String    @default("horizontal")            // "horizontal", "vertical"
+  isActive        Boolean   @default(true)
+  clicks          AdClick[]
+  displayCount    Int       @default(0)                       // Server-side impression counter
+  cityIds         String    @default("")                      // Comma-separated city IDs where ad should show (empty = all)
+  countdownSeconds Int      @default(10)                      // Seconds before X close button becomes active
+  createdById     String
+  createdBy       User      @relation("AdCreator", fields: [createdById], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model AdClick {
+  id          String   @id @default(cuid())
+  adId        String
+  ad          Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  fingerprint String    // Visitor fingerprint (hash)
+  ip          String?
+  country     String?                                     // ISO country code from IP
+  region      String?
+  city        String?
+  browser     String?                                     // e.g. "Chrome 120"
+  os          String?                                     // e.g. "Windows"
+  deviceType  String?                                     // "desktop", "mobile", "tablet"
+  referer     String?
+  createdAt   DateTime @default(now())
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SITE VISITS & SETTINGS
+   ════════════════════════════════════════════════════════════════════════════ */
+
+model SiteVisit {
+  id          String   @id @default(cuid())
+  fingerprint String                                    // Visitor fingerprint
+  ip          String?
+  country     String?
+  region      String?
+  city        String?
+  browser     String?
+  os          String?
+  deviceType  String?
+  referer     String?
+  path        String?                                    // Page path visited
+  createdAt   DateTime @default(now())
+}
+
+model SiteSetting {
+  key         String   @id                             // e.g. "visitCounterEnabled", "realtimeCounterEnabled"
+  value       String   @default("false")
+  updatedAt   DateTime @updatedAt
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PUBLICATIONS / NEWS
+   ════════════════════════════════════════════════════════════════════════════ */
+
+model Publication {
+  id          String   @id @default(cuid())
+  title       String
+  content     String                                          // Rich text / HTML content
+  imageUrl    String?                                         // Optional cover / hero image URL
+  type        String   @default("card")                       // "card" (notice strip) or "article" (opens in modal)
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)                            // Display order (lower = first)
+  createdById String
+  createdBy   User     @relation("PublicationCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PERMISSIONS & EVENT ACCESS
+   ════════════════════════════════════════════════════════════════════════════ */
+
+model RoleSectionPermission {
+  id        String   @id @default(cuid())
+  role      String   // "CREATOR" or "INITIATOR"
+  section   String   // "events", "teams", "sports", "locations", "publications", "ads", "analytics"
+  canView   Boolean  @default(false)
+  canCreate Boolean  @default(false)
+  canEdit   Boolean  @default(false)
+  canDelete Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([role, section])
+}
+
+model EventAccess {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("UserEventAccess", fields: [userId], references: [id], onDelete: Cascade)
+  eventId   String
+  event     Event    @relation("EventAccessEntry", fields: [eventId], references: [id], onDelete: Cascade)
+  assignedBy String  // userId of who assigned this access
+  createdAt DateTime @default(now())
+
+  @@unique([userId, eventId])
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TOURNAMENTS & PHASES
+   ════════════════════════════════════════════════════════════════════════════ */
+
+model Tournament {
+  id          String   @id @default(cuid())
+  name        String
+  sportId     String
+  sport       Sport    @relation("TournamentSport", fields: [sportId], references: [id])
+  startDate   String?  // ISO date string "2026-01-15"
+  endDate     String?
+  location    String?
+  logo        String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdById String
+  createdBy   User     @relation("TournamentCreator", fields: [createdById], references: [id])
+  phases      TournamentPhase[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TournamentPhase {
+  id           String     @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  name         String
+  type         String     @default("GRUPOS") // ELIMINATORIA, GRUPOS, OCTAVOS, CUARTOS, SEMIFINAL, FINAL, TERCER_PUESTO
+  order        Int        @default(0)
+  isActive     Boolean    @default(true)
+  events       Event[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([tournamentId, name])
+}

@@ -1,0 +1,82 @@
+# CI — Continuous Integration
+# Verifica que el build pasa en cada push y PR a main
+# Documentación: https://docs.github.com/en/actions
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Cancela runs obsoletos de la misma rama/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Permisos mínimos
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      matrix:
+        node-version: [20, 22]
+        # Bun también está soportado; este job usa Node para máxima compatibilidad
+      fail-fast: false
+
+    env:
+      DATABASE_URL: "file:/tmp/test.db"
+      JWT_SECRET: "ci-test-secret-not-for-production-xxxxxxxxxxxxxxxxxxxx"
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 🟢 Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Generate Prisma Client
+        run: npx prisma generate
+
+      - name: 🗄️ Push schema to test DB
+        run: npx prisma db push --skip-generate
+
+      - name: 🌱 Seed database
+        run: npx prisma db seed || true
+
+      - name: 🔍 Lint
+        run: npm run lint
+        continue-on-error: true # lint no bloquea build inicialmente
+
+      - name: 🏗️ Build
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: 📤 Upload build artifact (solo Node 22)
+        if: matrix.node-version == 22 && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-standalone-build
+          path: |
+            .next/standalone
+            .next/static
+            public
+          retention-days: 7
+          if-no-files-found: warn

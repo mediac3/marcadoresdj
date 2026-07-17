@@ -1,0 +1,134 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitignore — MarcadoresDJ
+# Basado en la plantilla oficial de GitHub para Node.js + Next.js + Prisma
+# https://github.com/github/gitignore/blob/main/Node.gitignore
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─── Dependencias ────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ─── Build de Next.js ────────────────────────────────────────────────────────
+/.next/
+/out/
+/build/
+next-env.d.ts
+
+# ─── Prisma ──────────────────────────────────────────────────────────────────
+# Solo ignoramos la base de datos SQLite local, no el schema ni el seed
+/db/*.db
+/db/*.db-journal
+/db/*.db-shm
+/db/*.db-wal
+/prisma/migrations/dev.db*
+
+# ─── Producción ──────────────────────────────────────────────────────────────
+/dist/
+/standalone/
+
+# ─── Testing ─────────────────────────────────────────────────────────────────
+/coverage/
+*.lcov
+.nyc_output/
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+dev.log
+dev.out.log
+server.log
+logs/
+*.log
+
+# ─── Variables de entorno (NUNCA subir secretos) ─────────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.production
+.env.*.local
+!.env.example
+!.env.sample
+
+# ─── Sistema operativo ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# ─── Editores / IDEs ─────────────────────────────────────────────────────────
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+.history/
+
+# ─── TypeScript ──────────────────────────────────────────────────────────────
+*.tsbuildinfo
+
+# ─── Vercel ──────────────────────────────────────────────────────────────────
+.vercel
+
+# ─── Caché de herramientas ───────────────────────────────────────────────────
+.cache/
+.eslintcache
+.turbo/
+*.tsbuildinfo
+
+# ─── Runtime / PID ───────────────────────────────────────────────────────────
+.server.pid
+*.pid
+*.seed
+*.pid.lock
+
+# ─── Artefactos de build del agente (z.ai/xcloud) ────────────────────────────
+# tool-results es output de ejecución del agente, no parte del código
+/tool-results/
+# Uploads temporales del agente
+/upload/
+# Build output intermedio
+/tmp/
+
+# ─── Mini-services build output ──────────────────────────────────────────────
+/mini-services/*/dist/
+/mini-services/*/node_modules/
+/mini-services/*/build/
+
+# ─── Archivos subidos por usuarios (preservar estructura, ignorar contenido) ─
+/public/uploads/logos/*
+!/public/uploads/logos/.gitkeep
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# ─── Skills internos (no parte del proyecto público) ────────────────────────
+/skills/
+
+# ─── Worklog local (puede contener info sensible del proceso de desarrollo) ──
+/worklog.md
+/agent-ctx/
+/download/
+/examples/
+
+# ─── Archivos de configuración local ─────────────────────────────────────────
+local-*
+.claude
+.z-ai-config
+*.local
+
+# ─── Configuración específica del agente z.ai ────────────────────────────────
+/.zscripts/mini-service-*.log
+/.zscripts/dev.pid

@@ -8,7 +8,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─── Stage 1: deps ───────────────────────────────────────────────────────────
-FROM node:20-slim AS deps
+FROM node:26-slim AS deps
 WORKDIR /app
 
 # OpenSSL requerido por Prisma en imágenes slim
@@ -25,7 +25,7 @@ COPY prisma ./prisma
 RUN npm ci --omit=optional && npx prisma generate
 
 # ─── Stage 2: builder ────────────────────────────────────────────────────────
-FROM node:20-slim AS builder
+FROM node:26-slim AS builder
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,7 +49,7 @@ RUN npm run build
 RUN npx prisma db push --skip-generate || true
 
 # ─── Stage 3: runner (imagen final mínima) ──────────────────────────────────
-FROM node:20-slim AS runner
+FROM node:26-slim AS runner
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

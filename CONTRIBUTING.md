@@ -7,7 +7,7 @@
 1. **Haz fork** del repositorio a tu cuenta de GitHub.
 2. **Clona** tu fork localmente:
    ```bash
-   git clone https://github.com/TU_USUARIO/marcadoresdj.git
+   git clone https://github.com/mediac3/marcadoresdj.git
    cd marcadoresdj
    ```
 3. **Agrega el upstream** para mantener sincronizado tu fork:

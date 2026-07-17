@@ -130,7 +130,7 @@ MarcadoresDJ
 
 ```bash
 # 1. Clonar el repositorio
-git clone https://github.com/TU_USUARIO/marcadoresdj.git
+git clone https://github.com/mediac3/marcadoresdj.git
 cd marcadoresdj
 
 # 2. Instalar dependencias

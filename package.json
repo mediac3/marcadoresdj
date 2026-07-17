@@ -5,13 +5,13 @@
   "description": "Plataforma de marcadores deportivos en tiempo real construida con Next.js 16, TypeScript, Prisma y Tailwind CSS.",
   "license": "MIT",
   "author": "MarcadoresDJ",
-  "homepage": "https://github.com/TU_USUARIO/marcadoresdj#readme",
+  "homepage": "https://github.com/mediac3/marcadoresdj#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TU_USUARIO/marcadoresdj.git"
+    "url": "git+https://github.com/mediac3/marcadoresdj.git"
   },
   "bugs": {
-    "url": "https://github.com/TU_USUARIO/marcadoresdj/issues"
+    "url": "https://github.com/mediac3/marcadoresdj/issues"
   },
   "keywords": [
     "nextjs",

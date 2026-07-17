@@ -35,7 +35,7 @@ código, ediciones de wiki, issues y otras contribuciones que no estén
 alineadas con este Código de Conducta.
 
 Los casos de comportamiento abusivo, acosador o inaceptable pueden
-comunicarse al equipo del proyecto en **[INSERTA EMAIL]**. Todas las
+comunicarse al equipo del proyecto en **mediac3@users.noreply.github.com**. Todas las
 quejas serán revisadas e investigadas.
 
 ## Atribución

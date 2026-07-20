@@ -14,6 +14,7 @@ import {
   X,
   Users,
   Pencil,
+  Trash2,
   Trophy,
   FileText,
   Upload,
@@ -50,7 +51,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useAppStore, type SportEvent, type Player } from '@/lib/store';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { EditEventModal } from '@/components/events/edit-event-modal';
 import { ImportEventsModal } from '@/components/events/import-events-modal';
@@ -147,6 +148,7 @@ function EventCard({
   onGoLive,
   onResume,
   onEdit,
+  onDelete,
   onReport,
   isCreatorOrAdmin,
   startingId,
@@ -156,6 +158,7 @@ function EventCard({
   onGoLive: () => void;
   onResume: () => void;
   onEdit: (e: React.MouseEvent) => void;
+  onDelete: (e: React.MouseEvent) => void;
   onReport: () => void;
   isCreatorOrAdmin: boolean;
   startingId: string | null;
@@ -372,6 +375,30 @@ function EventCard({
                 <Pencil className="size-3.5" />
               </Button>
             )}
+
+            {/* Delete button */}
+            {isCreatorOrAdmin && (
+              <Button
+                size="icon"
+                className="size-8 shrink-0"
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-secondary)',
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(e);
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#dc2626';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'var(--text-secondary)';
+                }}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            )}
           </div>
         </CardContent>
       </div>
@@ -387,6 +414,7 @@ function EventTableRow({
   onGoLive,
   onResume,
   onEdit,
+  onDelete,
   onReport,
   isCreatorOrAdmin,
   startingId,
@@ -396,6 +424,7 @@ function EventTableRow({
   onGoLive: () => void;
   onResume: () => void;
   onEdit: (e: React.MouseEvent) => void;
+  onDelete: (e: React.MouseEvent) => void;
   onReport: () => void;
   isCreatorOrAdmin: boolean;
   startingId: string | null;
@@ -571,6 +600,30 @@ function EventTableRow({
               }}
             >
               <Pencil className="size-3" />
+            </Button>
+          )}
+
+          {/* Delete */}
+          {isCreatorOrAdmin && (
+            <Button
+              size="icon"
+              className="size-7 shrink-0"
+              style={{
+                background: 'transparent',
+                color: 'var(--text-muted)',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(e);
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#dc2626';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--text-muted)';
+              }}
+            >
+              <Trash2 className="size-3" />
             </Button>
           )}
         </div>
@@ -851,6 +904,10 @@ export function EventListView() {
   const [editEvent, setEditEvent] = useState<SportEvent | null>(null);
   const [editOpen, setEditOpen] = useState(false);
 
+  // Delete confirmation
+  const [deleteEvent, setDeleteEvent] = useState<SportEvent | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   // Import modal
   const [importOpen, setImportOpen] = useState(false);
 
@@ -958,6 +1015,33 @@ export function EventListView() {
   function handleEditClick(event: SportEvent) {
     setEditEvent(event);
     setEditOpen(true);
+  }
+
+  function handleDeleteClick(event: SportEvent) {
+    setDeleteEvent(event);
+  }
+
+  async function confirmDelete() {
+    if (!deleteEvent) return;
+
+    setDeleting(true);
+    try {
+      await apiDelete(`/api/events/${deleteEvent.id}`);
+      toast({
+        title: 'Evento eliminado',
+        description: `${deleteEvent.teamA?.name} vs ${deleteEvent.teamB?.name} ha sido eliminado.`,
+      });
+      await fetchEvents();
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Error al eliminar el evento',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeleting(false);
+      setDeleteEvent(null);
+    }
   }
 
   /* ── Render ────────────────────────────────────────────────────────────── */
@@ -1132,6 +1216,7 @@ export function EventListView() {
                   onGoLive={() => handleGoLiveRequest(evt)}
                   onResume={() => handleResumeRequest(evt)}
                   onEdit={() => handleEditClick(evt)}
+                  onDelete={() => handleDeleteClick(evt)}
                   onReport={() => navigate({ page: 'EVENT_REPORT', eventId: evt.id })}
                   isCreatorOrAdmin={canEdit}
                   startingId={startingId}
@@ -1151,6 +1236,7 @@ export function EventListView() {
               onGoLive={() => handleGoLiveRequest(evt)}
               onResume={() => handleResumeRequest(evt)}
               onEdit={() => handleEditClick(evt)}
+              onDelete={() => handleDeleteClick(evt)}
               onReport={() => navigate({ page: 'EVENT_REPORT', eventId: evt.id })}
               isCreatorOrAdmin={canEdit}
               startingId={startingId}
@@ -1214,6 +1300,64 @@ export function EventListView() {
         onOpenChange={setEditOpen}
         onSuccess={fetchEvents}
       />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteEvent} onOpenChange={(v) => { if (!v || !deleting) setDeleteEvent(null); }}>
+        <AlertDialogContent
+          style={{
+            background: 'var(--bg-secondary)',
+            borderColor: 'var(--border-custom)',
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle style={{ color: 'var(--text-primary)' }}>
+              Eliminar Evento
+            </AlertDialogTitle>
+            <AlertDialogDescription style={{ color: 'var(--text-secondary)' }}>
+              ¿Seguro que deseas eliminar el evento{' '}
+              <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {deleteEvent?.teamA?.name} vs {deleteEvent?.teamB?.name}
+              </span>
+              ? Esta acción no se puede deshacer y se perderán todos sus datos (marcador, acciones, comentarios).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={deleting}
+              style={{
+                borderColor: 'var(--border-custom)',
+                color: 'var(--text-secondary)',
+              }}
+              onClick={() => setDeleteEvent(null)}
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
+              style={{
+                background: '#dc2626',
+                color: '#fff',
+              }}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Eliminando...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="size-4 mr-2" />
+                  Eliminar
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Import events modal */}
       <ImportEventsModal

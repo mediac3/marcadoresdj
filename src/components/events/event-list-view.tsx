@@ -18,6 +18,7 @@ import {
   Trophy,
   FileText,
   Upload,
+  Star,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,6 +53,7 @@ import {
 } from '@/components/ui/table';
 import { useAppStore, type SportEvent, type Player } from '@/lib/store';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { calculateMVP, type MVPResult } from '@/lib/mvp-utils';
 import { useToast } from '@/hooks/use-toast';
 import { EditEventModal } from '@/components/events/edit-event-modal';
 import { ImportEventsModal } from '@/components/events/import-events-modal';
@@ -140,6 +142,44 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+/* ── MVP Badge ──────────────────────────────────────────────────────────────── */
+
+function MVPBadgeMini({ mvp }: { mvp: MVPResult }) {
+  const scoreLabel = Number.isInteger(mvp.score) ? `${mvp.score}` : mvp.score.toFixed(1);
+  const initials = mvp.playerName.split(' ').map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+  return (
+    <div
+      className="inline-flex items-center gap-1 shrink-0"
+      title={`Jugador del Partido: ${mvp.playerName} (#${mvp.playerNumber}) — ${scoreLabel}/10`}
+    >
+      <div className="relative shrink-0">
+        <div
+          className="flex items-center justify-center size-6 rounded-full overflow-hidden border-2"
+          style={{ borderColor: '#fbbf24', background: 'rgba(251,191,36,0.12)' }}
+        >
+          {mvp.playerPhoto ? (
+            <img src={mvp.playerPhoto} alt={mvp.playerName} className="size-full object-cover" />
+          ) : (
+            <span className="text-[8px] font-bold" style={{ color: 'var(--text-secondary)' }}>{initials || '?'}</span>
+          )}
+        </div>
+        <span
+          className="absolute -top-1 -right-1 flex items-center justify-center size-3.5 rounded-full"
+          style={{ background: '#fbbf24' }}
+        >
+          <Star className="size-2" fill="#1a1a1a" color="#1a1a1a" />
+        </span>
+      </div>
+      <span
+        className="text-[10px] font-extrabold tabular-nums px-1 py-0.5 rounded-full leading-none"
+        style={{ background: '#fbbf24', color: '#1a1a1a' }}
+      >
+        {scoreLabel}
+      </span>
+    </div>
+  );
+}
+
 /* ── Event Card (mobile / default) ──────────────────────────────────────────── */
 
 function EventCard({
@@ -152,6 +192,7 @@ function EventCard({
   onReport,
   isCreatorOrAdmin,
   startingId,
+  sportActions,
 }: {
   event: SportEvent;
   onClick: () => void;
@@ -162,10 +203,17 @@ function EventCard({
   onReport: () => void;
   isCreatorOrAdmin: boolean;
   startingId: string | null;
+  sportActions?: { name: string; mvpWeight: number }[];
 }) {
   const cfg = statusConfig(event.status);
   const isLive = event.status === 'LIVE' || event.status === 'PAUSED';
   const isStarting = startingId === event.id;
+
+  const showMVP = (isLive || event.status === 'FINISHED') && sportActions && sportActions.length > 0;
+  const mvp = useMemo(
+    () => (showMVP ? calculateMVP(event.actions ?? [], sportActions!) : null),
+    [showMVP, event.actions, sportActions],
+  );
 
   return (
     <Card
@@ -212,13 +260,14 @@ function EventCard({
 
           {/* Score / Teams */}
           <div className="flex items-center justify-center gap-3 sm:gap-5">
-            <div className="text-right min-w-0 flex-1">
+            <div className="text-right min-w-0 flex-1 flex flex-col items-end gap-1">
               <p
                 className="text-sm font-semibold truncate"
                 style={{ color: 'var(--text-primary)' }}
               >
                 {event.teamA?.name}
               </p>
+              {mvp && <MVPBadgeMini mvp={mvp} />}
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
@@ -418,6 +467,7 @@ function EventTableRow({
   onReport,
   isCreatorOrAdmin,
   startingId,
+  sportActions,
 }: {
   event: SportEvent;
   onClick: () => void;
@@ -428,10 +478,17 @@ function EventTableRow({
   onReport: () => void;
   isCreatorOrAdmin: boolean;
   startingId: string | null;
+  sportActions?: { name: string; mvpWeight: number }[];
 }) {
   const cfg = statusConfig(event.status);
   const isLive = event.status === 'LIVE' || event.status === 'PAUSED';
   const isStarting = startingId === event.id;
+
+  const showMVP = (isLive || event.status === 'FINISHED') && sportActions && sportActions.length > 0;
+  const mvp = useMemo(
+    () => (showMVP ? calculateMVP(event.actions ?? [], sportActions!) : null),
+    [showMVP, event.actions, sportActions],
+  );
 
   return (
     <TableRow
@@ -449,12 +506,15 @@ function EventTableRow({
         <span className="text-base">{event.sport?.icon}</span>
       </TableCell>
       <TableCell className="py-3 px-3">
-        <p
-          className="text-sm font-semibold truncate max-w-[140px]"
-          style={{ color: 'var(--text-primary)' }}
-        >
-          {event.teamA?.name}
-        </p>
+        <div className="flex flex-col gap-1">
+          <p
+            className="text-sm font-semibold truncate max-w-[140px]"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {event.teamA?.name}
+          </p>
+          {mvp && <MVPBadgeMini mvp={mvp} />}
+        </div>
       </TableCell>
       <TableCell className="py-3 px-2 text-center">
         <div className="flex items-center justify-center gap-1.5">
@@ -911,6 +971,9 @@ export function EventListView() {
   // Import modal
   const [importOpen, setImportOpen] = useState(false);
 
+  // Sport actions (for MVP calculation)
+  const [sportActions, setSportActions] = useState<{ name: string; mvpWeight: number }[]>([]);
+
   const fetchEvents = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -932,6 +995,27 @@ export function EventListView() {
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
+
+  // Fetch sport actions (once) for MVP (Jugador del Partido) calculation
+  useEffect(() => {
+    apiGet<{ success: boolean; sports: { id: string; actions: { name: string; mvpWeight: number }[] }[] }>(
+      '/api/sports?all=true'
+    )
+      .then((data) => {
+        if (data?.success && Array.isArray(data.sports)) {
+          const allActions: { name: string; mvpWeight: number }[] = [];
+          for (const sport of data.sports) {
+            if (Array.isArray(sport.actions)) {
+              for (const a of sport.actions) {
+                allActions.push({ name: a.name, mvpWeight: a.mvpWeight ?? 0 });
+              }
+            }
+          }
+          setSportActions(allActions);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const filteredEvents = useMemo(() => {
     if (!search.trim()) return events;
@@ -1220,6 +1304,7 @@ export function EventListView() {
                   onReport={() => navigate({ page: 'EVENT_REPORT', eventId: evt.id })}
                   isCreatorOrAdmin={canEdit}
                   startingId={startingId}
+                  sportActions={sportActions}
                 />
               ))}
             </TableBody>
@@ -1240,6 +1325,7 @@ export function EventListView() {
               onReport={() => navigate({ page: 'EVENT_REPORT', eventId: evt.id })}
               isCreatorOrAdmin={canEdit}
               startingId={startingId}
+              sportActions={sportActions}
             />
           ))}
         </div>

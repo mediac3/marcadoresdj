@@ -25,7 +25,9 @@ import {
   MessageCircle,
   Table2,
   GitBranch,
+  Star,
 } from 'lucide-react';
+import { calculateMVP, type MVPResult } from '@/lib/mvp-utils';
 import { LocationSelector } from '@/components/locations/location-selector';
 import {
   useVisitorFingerprint,
@@ -93,6 +95,7 @@ interface PublicActionPlayer {
   name: string;
   number: number;
   nickname: string | null;
+  photo: string | null;
   teamId: string;
 }
 
@@ -595,6 +598,62 @@ function useLocationAds(cityId: string | null | undefined, enabled: boolean) {
   return ads;
 }
 
+/* ── MVP (Jugador del Partido) badge ────────────────────────────────────────── */
+
+/** Mini badge showing the player of the match: photo + star + score. */
+function MVPBadge({
+  mvp,
+  align,
+}: {
+  mvp: MVPResult;
+  align: 'right' | 'left';
+}) {
+  const scoreLabel = Number.isInteger(mvp.score) ? `${mvp.score}` : mvp.score.toFixed(1);
+  const initials = mvp.playerName
+    .split(' ')
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  return (
+    <div
+      className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row' : 'flex-row-reverse'}`}
+      title={`Jugador del Partido: ${mvp.playerName} (#${mvp.playerNumber}) — ${scoreLabel}/10`}
+    >
+      <div className="relative shrink-0">
+        <div
+          className="flex items-center justify-center size-7 rounded-full overflow-hidden border-2"
+          style={{ borderColor: '#fbbf24', background: '#fbbf2422' }}
+        >
+          {mvp.playerPhoto ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mvp.playerPhoto} alt={mvp.playerName} className="size-full object-cover" />
+          ) : (
+            <span className="text-[9px] font-bold" style={{ color: 'var(--text-secondary)' }}>
+              {initials || '?'}
+            </span>
+          )}
+        </div>
+        <span
+          className="absolute -top-1.5 -right-1.5 flex items-center justify-center size-4 rounded-full"
+          style={{ background: '#fbbf24' }}
+        >
+          <Star className="size-2.5" fill="#1a1a1a" color="#1a1a1a" />
+        </span>
+      </div>
+      <span
+        className="text-xs font-extrabold tabular-nums px-1.5 py-0.5 rounded-full"
+        style={{ background: '#fbbf24', color: '#1a1a1a' }}
+      >
+        {scoreLabel}
+      </span>
+    </div>
+  );
+}
+
+
 function EventCard({
   event,
   isExpanded,
@@ -603,6 +662,7 @@ function EventCard({
   selectionMode,
   selected,
   onToggleSelect,
+  sportActions,
 }: {
   event: PublicEvent;
   isExpanded: boolean;
@@ -611,6 +671,7 @@ function EventCard({
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
+  sportActions?: { name: string; mvpWeight: number }[];
 }) {
   const isLive = event.status === 'LIVE';
   const isPaused = event.status === 'PAUSED';
@@ -618,6 +679,13 @@ function EventCard({
 
   const teamA = event.teamA;
   const teamB = event.teamB;
+
+  // MVP (Jugador del Partido) — only show for LIVE/PAUSED/FINISHED events with sport actions
+  const showMVP = (isLive || isPaused || event.status === 'FINISHED') && sportActions && sportActions.length > 0;
+  const mvp = useMemo(
+    () => (showMVP ? calculateMVP(event.actions ?? [], sportActions!) : null),
+    [showMVP, event.actions, sportActions],
+  );
 
   return (
     <div
@@ -691,10 +759,13 @@ function EventCard({
           )}
         </div>
         <div className="flex items-center justify-between gap-2 mt-1">
-          <div className="flex-1 min-w-0 text-right">
+          <div className="flex-1 min-w-0 flex flex-col items-end gap-1">
             <p className="font-bold text-sm sm:text-base"
               style={{ color: isExpanded ? '#fff' : 'var(--text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}
               title={teamA?.name || ''}>{getTeamLabel(teamA)}</p>
+            {mvp && (
+              <MVPBadge mvp={mvp} align="right" />
+            )}
           </div>
           {showScore ? (
             <div className="flex flex-col items-center px-3 shrink-0">
@@ -1607,6 +1678,7 @@ export function PublicView() {
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const [tournaments, setTournaments] = useState<TournamentGroup[]>([]);
   const [nonTournamentEvents, setNonTournamentEvents] = useState<PublicEvent[]>([]);
+  const [sportActions, setSportActions] = useState<{ name: string; mvpWeight: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'tournaments' | 'grid'>('tournaments');
   const [filterCountryId, setFilterCountryId] = useState<string | null>(null);
@@ -1843,6 +1915,27 @@ export function PublicView() {
       // silently ignore
     }
   }, [filterCountryId, filterDepartmentId, filterCityId]);
+
+  /* ── Fetch sport actions (once, for MVP calculation) ── */
+  useEffect(() => {
+    fetch('/api/public/sports')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.success && Array.isArray(data.sports)) {
+          // Flatten all sport actions into a single map of name → mvpWeight
+          const allActions: { name: string; mvpWeight: number }[] = [];
+          for (const sport of data.sports) {
+            if (Array.isArray(sport.actions)) {
+              for (const a of sport.actions) {
+                allActions.push({ name: a.name, mvpWeight: a.mvpWeight ?? 0 });
+              }
+            }
+          }
+          setSportActions(allActions);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   /* ── Fetch expanded detail ── */
   const fetchExpanded = useCallback(async (eventId: string) => {
@@ -2450,6 +2543,7 @@ export function PublicView() {
                       selectionMode={selectionMode}
                       selected={selectedIds.has(evt.id)}
                       onToggleSelect={toggleSelect}
+                      sportActions={sportActions}
                     />
                   ))}
                 </div>
@@ -2520,6 +2614,7 @@ export function PublicView() {
                   selectionMode={selectionMode}
                   selected={selectedIds.has(evt.id)}
                   onToggleSelect={toggleSelect}
+                  sportActions={sportActions}
                 />
               ))}
             </div>

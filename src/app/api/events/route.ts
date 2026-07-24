@@ -63,6 +63,25 @@ export async function GET(request: NextRequest) {
             },
           },
         },
+        actions: {
+          select: {
+            id: true,
+            playerId: true,
+            actionType: true,
+            value: true,
+            player: {
+              select: {
+                id: true,
+                name: true,
+                number: true,
+                nickname: true,
+                photo: true,
+                teamId: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
       },
       orderBy: { createdAt: "desc" },
     });

@@ -17,6 +17,7 @@ interface SportAction {
   color: string;
   sortOrder: number;
   defaultValue: number;
+  mvpWeight: number;
   sportId: string;
 }
 

@@ -59,10 +59,11 @@ interface ActionFormData {
   color: string;
   sortOrder: number;
   defaultValue: number;
+  mvpWeight: number;
 }
 
 const EMPTY_SPORT: SportFormData = { name: '', icon: '' };
-const EMPTY_ACTION: ActionFormData = { name: '', label: '', icon: '', color: '#ffffff', sortOrder: 0, defaultValue: 1 };
+const EMPTY_ACTION: ActionFormData = { name: '', label: '', icon: '', color: '#ffffff', sortOrder: 0, defaultValue: 1, mvpWeight: 0 };
 
 /* ── Access Denied ─────────────────────────────────────────────────────────── */
 
@@ -215,8 +216,9 @@ function ActionModal({
           color: editingAction.color,
           sortOrder: editingAction.sortOrder,
           defaultValue: editingAction.defaultValue ?? 1,
+          mvpWeight: editingAction.mvpWeight ?? 0,
         }
-      : { ...EMPTY_ACTION, sortOrder: 0, defaultValue: 1 },
+      : { ...EMPTY_ACTION, sortOrder: 0, defaultValue: 1, mvpWeight: 0 },
   );
   const [errors, setErrors] = useState<Partial<Record<keyof ActionFormData, string>>>({});
 
@@ -360,6 +362,27 @@ function ActionModal({
             />
             <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
               Cantidad de puntos que suma cada clic. Predeterminado: 1
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label style={{ color: 'var(--text-secondary)' }}>
+              Peso MVP <span style={{ color: 'var(--text-muted)' }}>(Jugador del Partido)</span>
+            </Label>
+            <Input
+              type="number"
+              min={-10}
+              max={10}
+              value={form.mvpWeight}
+              onChange={(e) => handleChange('mvpWeight', parseInt(e.target.value) || 0)}
+              style={{
+                background: 'var(--bg-primary)',
+                borderColor: 'var(--border)',
+                color: 'var(--text-primary)',
+              }}
+            />
+            <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              Puntos que suma (+) o resta (-) al puntaje MVP del jugador. Base 10. Ej: Gol +2, Asistencia +1, Amarilla -1, Roja -3.
             </p>
           </div>
         </div>
@@ -536,7 +559,7 @@ function SportItem({
                       {action.label}
                     </p>
                     <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      {action.name} · Orden: {action.sortOrder} · Valor: {action.defaultValue ?? 1}
+                      {action.name} · Orden: {action.sortOrder} · Valor: {action.defaultValue ?? 1} · MVP: {action.mvpWeight > 0 ? '+' : ''}{action.mvpWeight ?? 0}
                     </p>
                   </div>
                   {/* Color dot */}

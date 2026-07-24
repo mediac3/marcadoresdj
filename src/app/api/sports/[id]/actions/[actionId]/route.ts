@@ -43,7 +43,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, label, icon, color, sortOrder, defaultValue } = body;
+    const { name, label, icon, color, sortOrder, defaultValue, mvpWeight } = body;
 
     if (name && name !== existing.name) {
       const nameTaken = await db.sportAction.findUnique({
@@ -66,6 +66,7 @@ export async function PUT(
         ...(color !== undefined && { color }),
         ...(sortOrder !== undefined && { sortOrder }),
         ...(defaultValue !== undefined && { defaultValue }),
+        ...(mvpWeight !== undefined && { mvpWeight }),
       },
     });
 

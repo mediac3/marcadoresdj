@@ -47,6 +47,7 @@ model SportAction {
   color       String   @default("#ffffff")
   sortOrder   Int      @default(0)
   defaultValue Int     @default(1) // Points value per click (1 = default, 2 = canasta, 3 = triple, etc.)
+  mvpWeight    Int     @default(0) // MVP rating weight (+sums, -subtracts from base 10)
   sportId     String
   sport       Sport    @relation(fields: [sportId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())

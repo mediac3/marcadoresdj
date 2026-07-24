@@ -86,7 +86,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { name, label, icon, color, sortOrder, defaultValue } = body;
+    const { name, label, icon, color, sortOrder, defaultValue, mvpWeight } = body;
 
     if (!name || !label || !icon) {
       return NextResponse.json(
@@ -113,6 +113,7 @@ export async function POST(
         color: color || "#ffffff",
         sortOrder: sortOrder ?? 0,
         defaultValue: typeof defaultValue === "number" ? defaultValue : 1,
+        mvpWeight: typeof mvpWeight === "number" ? mvpWeight : 0,
         sportId: id,
       },
     });

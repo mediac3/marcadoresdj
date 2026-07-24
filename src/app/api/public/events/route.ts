@@ -84,6 +84,7 @@ export async function GET(request: NextRequest) {
                 name: true,
                 number: true,
                 nickname: true,
+                photo: true,
                 teamId: true,
               },
             },

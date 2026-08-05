@@ -25,6 +25,7 @@ import {
   MessageCircle,
   Table2,
   GitBranch,
+  Target,
 } from 'lucide-react';
 import { LocationSelector } from '@/components/locations/location-selector';
 import {
@@ -1015,6 +1016,100 @@ function StandingsTable({ standings }: { standings: StandingRow[] }) {
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
+   SCORERS TABLE (Goleadores / Anotadores / Carreras)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+interface ScorerRow {
+  playerId: string;
+  playerName: string;
+  playerNumber: number | null;
+  playerPhoto: string | null;
+  teamId: string;
+  teamName: string;
+  teamShortName: string | null;
+  teamLogo: string | null;
+  total: number;
+  matchesPlayed: number;
+  breakdown: Record<string, number>;
+}
+
+const SCORER_MEDALS = ['🥇', '🥈', '🥉'];
+
+function ScorersTable({ scorers }: { scorers: ScorerRow[] }) {
+  if (scorers.length === 0) return null;
+  return (
+    <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border-custom)' }}>
+      <table className="w-full text-xs" style={{ minWidth: '340px' }}>
+        <thead>
+          <tr style={{ background: 'var(--bg-secondary)' }}>
+            <th className="text-left px-2 py-1.5 font-bold" style={{ color: 'var(--text-muted)', width: '6%' }}>#</th>
+            <th className="text-left px-2 py-1.5 font-bold" style={{ color: 'var(--text-muted)' }}>Jugador</th>
+            <th className="text-left px-2 py-1.5 font-bold" style={{ color: 'var(--text-muted)' }}>Equipo</th>
+            <th className="text-center px-1 py-1.5 font-bold" style={{ color: 'var(--text-muted)' }}>PJ</th>
+            <th className="text-center px-1 py-1.5 font-bold" style={{ color: 'var(--accent)', width: '10%' }}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {scorers.map((row, idx) => (
+            <tr
+              key={row.playerId}
+              className="transition-colors"
+              style={{
+                borderTop: '1px solid var(--border-custom)',
+                background: idx < 3 ? 'rgba(225, 29, 72, 0.04)' : 'transparent',
+              }}
+            >
+              <td className="px-2 py-1.5 font-bold tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                {idx < 3 ? SCORER_MEDALS[idx] : idx + 1}
+              </td>
+              <td className="px-2 py-1.5">
+                <div className="flex items-center gap-2">
+                  {row.playerPhoto ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={row.playerPhoto} alt="" className="size-5 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <div className="size-5 rounded-full shrink-0 flex items-center justify-center text-[8px] font-bold"
+                      style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
+                      {row.playerName[0]}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <span className="font-semibold truncate block" style={{ color: 'var(--text-primary)', maxWidth: '120px' }}>
+                      {row.playerName}
+                    </span>
+                    {row.playerNumber != null && (
+                      <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>#{row.playerNumber}</span>
+                    )}
+                  </div>
+                </div>
+              </td>
+              <td className="px-2 py-1.5">
+                <div className="flex items-center gap-2">
+                  {row.teamLogo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={row.teamLogo} alt="" className="size-4 object-contain rounded shrink-0" />
+                  ) : (
+                    <div className="size-4 rounded shrink-0 flex items-center justify-center text-[7px] font-bold"
+                      style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
+                      {row.teamName[0]}
+                    </div>
+                  )}
+                  <span className="font-medium truncate" style={{ color: 'var(--text-secondary)', maxWidth: '100px' }}>
+                    {row.teamShortName || row.teamName}
+                  </span>
+                </div>
+              </td>
+              <td className="text-center px-1 py-1.5 tabular-nums" style={{ color: 'var(--text-secondary)' }}>{row.matchesPlayed}</td>
+              <td className="text-center px-1 py-1.5 tabular-nums font-extrabold" style={{ color: 'var(--accent)' }}>{row.total}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
    BRACKET VIEW (Elimination Tree)
    ════════════════════════════════════════════════════════════════════════════ */
 
@@ -1189,11 +1284,14 @@ function TournamentSection({
   onEventClick: (eventId: string) => void;
   liveElapsedFn: (event: PublicEvent) => number | null;
 }) {
-  const [activeView, setActiveView] = useState<'matches' | 'standings' | 'bracket'>('matches');
+  const [activeView, setActiveView] = useState<'matches' | 'standings' | 'bracket' | 'scorers'>('matches');
   const [standings, setStandings] = useState<Array<{ phaseId: string; phaseName: string; phaseOrder: number; standings: StandingRow[] }>>([]);
   const [bracketData, setBracketData] = useState<{ rounds: BracketRoundData[]; thirdPlaceMatch: BracketMatchData | null } | null>(null);
+  const [scorers, setScorers] = useState<ScorerRow[]>([]);
+  const [scorersTabLabel, setScorersTabLabel] = useState<string>('Goleadores');
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [bracketLoading, setBracketLoading] = useState(false);
+  const [scorersLoading, setScorersLoading] = useState(false);
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
 
   const hasGrupos = tournament.phases.some((p) => p.type === 'GRUPOS');
@@ -1230,6 +1328,22 @@ function TournamentSection({
       .catch(() => {})
       .finally(() => setBracketLoading(false));
   }, [tournamentId, hasElimination]);
+
+  // Fetch scorers
+  useEffect(() => {
+    if (!tournamentId) return;
+    setScorersLoading(true);
+    fetch(`/api/public/tournaments/${tournamentId}/scorers`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setScorers(data.scorers ?? []);
+          setScorersTabLabel(data.tabLabel ?? 'Goleadores');
+        }
+      })
+      .catch(() => {})
+      .finally(() => setScorersLoading(false));
+  }, [tournamentId]);
 
   // Determine default view
   useEffect(() => {
@@ -1317,6 +1431,20 @@ function TournamentSection({
         >
           <Calendar className="size-3" /> Partidos
         </button>
+        {tournamentId && (
+          <button
+            type="button"
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors"
+            style={{
+              background: activeView === 'scorers' ? 'var(--accent)' : 'var(--bg-secondary)',
+              color: activeView === 'scorers' ? '#fff' : 'var(--text-muted)',
+              border: `1px solid ${activeView === 'scorers' ? 'var(--accent)' : 'var(--border-custom)'}`,
+            }}
+            onClick={() => setActiveView('scorers')}
+          >
+            <Target className="size-3" /> {scorersTabLabel}
+          </button>
+        )}
       </div>
 
       {/* Content area */}
@@ -1372,6 +1500,20 @@ function TournamentSection({
                 title="Resultados"
               />
             </div>
+          )}
+        </div>
+      )}
+
+      {activeView === 'scorers' && (
+        <div>
+          {scorersLoading ? (
+            <Skeleton className="h-48 w-full" />
+          ) : scorers.length > 0 ? (
+            <ScorersTable scorers={scorers} />
+          ) : (
+            <p className="text-xs text-center py-6" style={{ color: 'var(--text-muted)' }}>
+              No hay datos de {scorersTabLabel.toLowerCase()} aún
+            </p>
           )}
         </div>
       )}

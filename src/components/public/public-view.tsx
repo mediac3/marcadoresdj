@@ -22,6 +22,7 @@ import {
   CheckSquare,
   Square,
   UserPlus,
+  Plus,
   MessageCircle,
   Table2,
   GitBranch,
@@ -40,6 +41,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible';
+import { useOpenTournaments } from '@/hooks/use-collapsed-tournaments';
+import { PublicEventWizard } from '@/components/public/public-event-wizard';
 import {
   Avatar,
   AvatarImage,
@@ -337,10 +345,20 @@ function teamSubInfo(gender: string, ageCategory: string): string | null {
 }
 
 function isGoalAction(sportName: string, actionType: string): boolean {
-  const key = sportName.toLowerCase();
+  // sportName arrives as the human label ("Fútbol", "Microfútbol"); normalise
+  // to the ASCII lowercase key used by GOAL_ACTION_TYPES, and compare against
+  // the real SportAction.name values stored in EventAction.actionType.
+  const key = sportName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
   const types = GOAL_ACTION_TYPES[key];
   if (!types) return false;
   return types.includes(actionType);
+}
+
+function isOwnGoalAction(actionType: string): boolean {
+  return actionType === 'OWN_GOAL';
 }
 
 function isGoalOrCard(action: DetailAction, sportName: string): boolean {
@@ -351,6 +369,25 @@ function isGoalOrCard(action: DetailAction, sportName: string): boolean {
     label.includes('roja') ||
     label.includes('tarjeta')
   );
+}
+
+/**
+ * Resolve which team a goal/scoring action belongs to in the summary.
+ * Own goals count for the opposite team (mirrors event-scores.ts backend
+ * logic). Actions without a player resolve to null ("Sin asignar").
+ */
+function resolveGoalTeamId(
+  action: DetailAction,
+  teamAId: string,
+  teamBId: string,
+): string | null {
+  const teamId = action.player?.teamId ?? null;
+  if (!teamId) return null;
+  if (isOwnGoalAction(action.actionType)) {
+    if (teamId === teamAId) return teamBId;
+    if (teamId === teamBId) return teamAId;
+  }
+  return teamId;
 }
 
 function getTeamLabel(
@@ -767,14 +804,29 @@ function ExpandedEventPanel({
   const summaryA = useMemo(() => {
     if (!expandedData) return [];
     return expandedData.actions
-      .filter((a) => isGoalOrCard(a, expandedData.sportName) && a.player?.teamId === event.teamAId)
+      .filter((a) => {
+        if (!isGoalOrCard(a, expandedData.sportName)) return false;
+        // Goals: own goals count for the opposite team; cards: direct team.
+        const isGoal = isGoalAction(expandedData.sportName, a.actionType);
+        const teamId = isGoal
+          ? resolveGoalTeamId(a, event.teamAId, event.teamBId)
+          : a.player?.teamId ?? null;
+        return teamId === event.teamAId;
+      })
       .sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0));
   }, [expandedData, event.teamAId]);
 
   const summaryB = useMemo(() => {
     if (!expandedData) return [];
     return expandedData.actions
-      .filter((a) => isGoalOrCard(a, expandedData.sportName) && a.player?.teamId === event.teamBId)
+      .filter((a) => {
+        if (!isGoalOrCard(a, expandedData.sportName)) return false;
+        const isGoal = isGoalAction(expandedData.sportName, a.actionType);
+        const teamId = isGoal
+          ? resolveGoalTeamId(a, event.teamAId, event.teamBId)
+          : a.player?.teamId ?? null;
+        return teamId === event.teamBId;
+      })
       .sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0));
   }, [expandedData, event.teamBId]);
 
@@ -1279,10 +1331,12 @@ function TournamentSection({
   tournament,
   onEventClick,
   liveElapsedFn,
+  hideHeader = false,
 }: {
   tournament: TournamentGroup;
   onEventClick: (eventId: string) => void;
   liveElapsedFn: (event: PublicEvent) => number | null;
+  hideHeader?: boolean;
 }) {
   const [activeView, setActiveView] = useState<'matches' | 'standings' | 'bracket' | 'scorers'>('matches');
   const [standings, setStandings] = useState<Array<{ phaseId: string; phaseName: string; phaseOrder: number; standings: StandingRow[] }>>([]);
@@ -1361,7 +1415,8 @@ function TournamentSection({
 
   return (
     <div className="space-y-3">
-      {/* Tournament header */}
+      {/* Tournament header (oculta cuando se renderiza dentro de un Collapsible) */}
+      {!hideHeader && (
       <div className="flex items-center gap-3">
         {tournament.logo ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -1388,6 +1443,7 @@ function TournamentSection({
           </span>
         )}
       </div>
+      )}
 
       {/* View tabs */}
       <div className="flex gap-1">
@@ -1740,6 +1796,7 @@ export function PublicView() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const [showLoginForm, setShowLoginForm] = useState(false);
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -1751,6 +1808,8 @@ export function PublicView() {
   const [nonTournamentEvents, setNonTournamentEvents] = useState<PublicEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'tournaments' | 'grid'>('tournaments');
+  // Tournaments collapsed by default; visitor expands to see content.
+  const { isOpen: isTournamentOpen, toggle: toggleTournament } = useOpenTournaments();
   const [filterCountryId, setFilterCountryId] = useState<string | null>(null);
   const [filterDepartmentId, setFilterDepartmentId] = useState<string | null>(null);
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
@@ -2276,6 +2335,20 @@ export function PublicView() {
               </Button>
             ))}
             <Separator orientation="vertical" className="h-5 mx-1" />
+            <button
+              type="button"
+              onClick={() => setShowCreateWizard(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold min-h-[44px] transition-colors"
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+                border: '1px solid var(--accent)',
+              }}
+            >
+              <Plus className="size-3.5" />
+              <span className="hidden sm:inline">Crear evento</span>
+              <span className="sm:hidden">Crear</span>
+            </button>
             <a
               href="#login"
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold min-h-[44px]"
@@ -2553,25 +2626,79 @@ export function PublicView() {
             ))}
           </div>
         ) : viewMode === 'tournaments' && tournaments.length > 0 ? (
-          /* ── TOURNAMENT VIEW ── */
-          <div className="space-y-6">
-            {tournaments.map((t) => (
-              <div
-                key={t.id}
-                className="rounded-xl p-4 space-y-1"
-                style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-custom)',
-                  boxShadow: 'var(--shadow)',
-                }}
-              >
-                <TournamentSection
-                  tournament={t}
-                  onEventClick={(eventId) => handleToggle(eventId)}
-                  liveElapsedFn={getLiveElapsed}
-                />
-              </div>
-            ))}
+          /* ── TOURNAMENT VIEW (torneos colapsados por defecto, expandibles) ── */
+          <div className="space-y-4">
+            {tournaments.map((t) => {
+              const tEvents = t.phases.flatMap((p) => p.events);
+              const tLive = tEvents.filter((e) => e.status === 'LIVE' || e.status === 'PAUSED').length;
+              const open = isTournamentOpen(t.id);
+              return (
+                <Collapsible
+                  key={t.id}
+                  open={open}
+                  onOpenChange={() => toggleTournament(t.id)}
+                  className="rounded-xl overflow-hidden"
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: `1px solid ${open ? 'var(--accent)' : 'var(--border-custom)'}`,
+                    boxShadow: 'var(--shadow)',
+                  }}
+                >
+                  {/* Trigger: cabecera resumen siempre visible */}
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 p-4 text-left transition-colors hover:bg-[var(--bg-secondary)]"
+                      aria-expanded={open}
+                    >
+                      {t.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.logo} alt="" className="size-8 object-contain rounded shrink-0" />
+                      ) : (
+                        <div className="size-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--accent)', color: '#fff' }}>
+                          <Trophy className="size-4" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-extrabold truncate" style={{ color: 'var(--text-primary)' }}>
+                          {t.name}
+                        </h3>
+                        {t.sport && (
+                          <p className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+                            {t.sport.icon} {t.sport.name}
+                          </p>
+                        )}
+                      </div>
+                      {tLive > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase shrink-0" style={{ color: 'var(--accent-red)' }}>
+                          <span className="inline-block size-1.5 rounded-full animate-pulse" style={{ background: 'var(--live-dot)' }} />
+                          {tLive} en vivo
+                        </span>
+                      )}
+                      <span className="text-[10px] font-medium shrink-0 hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
+                        {tEvents.length} {tEvents.length === 1 ? 'partido' : 'partidos'}
+                      </span>
+                      {open ? (
+                        <ChevronUp className="size-4 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                      ) : (
+                        <ChevronDown className="size-4 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  {/* Content: sección completa del torneo */}
+                  <CollapsibleContent>
+                    <div className="px-4 pb-4 pt-1">
+                      <TournamentSection
+                        tournament={t}
+                        hideHeader
+                        onEventClick={(eventId) => handleToggle(eventId)}
+                        liveElapsedFn={getLiveElapsed}
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })}
 
             {/* Non-tournament events (grid) */}
             {displayedEvents.length > 0 && (
@@ -3015,6 +3142,12 @@ export function PublicView() {
           )}
         </div>
       </footer>
+
+      {/* Wizard público de creación de eventos */}
+      <PublicEventWizard
+        open={showCreateWizard}
+        onClose={() => setShowCreateWizard(false)}
+      />
     </div>
   );
 }

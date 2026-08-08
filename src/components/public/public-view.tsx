@@ -22,6 +22,7 @@ import {
   CheckSquare,
   Square,
   UserPlus,
+  Plus,
   MessageCircle,
   Table2,
   GitBranch,
@@ -46,6 +47,7 @@ import {
   CollapsibleContent,
 } from '@/components/ui/collapsible';
 import { useOpenTournaments } from '@/hooks/use-collapsed-tournaments';
+import { PublicEventWizard } from '@/components/public/public-event-wizard';
 import {
   Avatar,
   AvatarImage,
@@ -1794,6 +1796,7 @@ export function PublicView() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const [showLoginForm, setShowLoginForm] = useState(false);
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -2332,6 +2335,20 @@ export function PublicView() {
               </Button>
             ))}
             <Separator orientation="vertical" className="h-5 mx-1" />
+            <button
+              type="button"
+              onClick={() => setShowCreateWizard(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold min-h-[44px] transition-colors"
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+                border: '1px solid var(--accent)',
+              }}
+            >
+              <Plus className="size-3.5" />
+              <span className="hidden sm:inline">Crear evento</span>
+              <span className="sm:hidden">Crear</span>
+            </button>
             <a
               href="#login"
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold min-h-[44px]"
@@ -3125,6 +3142,12 @@ export function PublicView() {
           )}
         </div>
       </footer>
+
+      {/* Wizard público de creación de eventos */}
+      <PublicEventWizard
+        open={showCreateWizard}
+        onClose={() => setShowCreateWizard(false)}
+      />
     </div>
   );
 }

@@ -126,6 +126,7 @@ type AppView =
   | { page: 'ADMIN_SETTINGS' }
   | { page: 'ADMIN_PERMISSIONS' }
   | { page: 'ADMIN_TOURNAMENTS' }
+  | { page: 'ADMIN_TERMS' }
   | { page: 'TEAMS' }
   | { page: 'TEAM_DETAIL'; teamId: string }
   | { page: 'CREATE_EVENT' }

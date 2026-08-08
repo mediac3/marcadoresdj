@@ -27,6 +27,12 @@ next-env.d.ts
 /db/*.db-shm
 /db/*.db-wal
 /prisma/migrations/dev.db*
+# Prisma puede crear un SQLite bajo prisma/db cuando resuelve rutas relativas
+/prisma/*.db
+/prisma/*.db-journal
+/prisma/*.db-shm
+/prisma/*.db-wal
+/prisma/db/
 
 # ─── Producción ──────────────────────────────────────────────────────────────
 /dist/

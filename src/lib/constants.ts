@@ -70,19 +70,55 @@ export const SPORT_POSITIONS: Record<string, string[]> = {
 // ── Goal / point-scoring action types ────────────────────────────────────────
 // These action names are used to determine which actions count towards the
 // scoreboard (scoreA / scoreB) for each sport.
+//
+// IMPORTANT: values must match the `SportAction.name` that gets stored verbatim
+// in `EventAction.actionType` (see prisma/seed.ts and scoring-view.tsx). The
+// backend scoreboard (event-scores.ts) actually keys off `value > 0`, but the
+// public view uses this map to decide which actions render as "goals" in the
+// match summary, so the names here MUST be the real seeded names (uppercase).
+//
+// Keys are sport names normalised to ASCII lowercase (accents stripped) since
+// the public view only has the human sport name ("Fútbol") available.
 
 export const GOAL_ACTION_TYPES: Record<string, string[]> = {
-  futbol: ['gol', 'autogol'],
-  microfutbol: ['gol', 'autogol'],
-  baloncesto: [
-    'tiro-libre',
-    'canasta-2',
-    'canasta-3',
-  ],
-  handball: ['gol'],
-  voleibol: ['punto'],
-  beisbol: ['carrera'],
+  futbol: ['GOAL', 'OWN_GOAL', 'PENALTY_GOAL', 'FREE_KICK_GOAL'],
+  microfutbol: ['FUTSAL_GOAL', 'FUTSAL_GOALKEEPER'],
+  baloncesto: ['FREE_THROW', 'TWO_POINTS', 'THREE_POINTS'],
+  handball: ['GOAL'],
+  voleibol: ['POINT'],
+  beisbol: ['RUN'],
 };
+
+/**
+ * Action types that represent an own goal (the point counts for the opposite
+ * team). Mirrors the literal the backend uses in event-scores.ts.
+ */
+export const OWN_GOAL_ACTION_TYPES = new Set(['OWN_GOAL']);
+
+/**
+ * Check whether a given action type contributes to the score in a sport.
+ * Accepts either a sport id or the human sport name (accents are stripped).
+ */
+export function isScoringAction(
+  sportKey: string,
+  actionType: string,
+): boolean {
+  const key = normalizeSportKey(sportKey);
+  const types = GOAL_ACTION_TYPES[key];
+  if (types) return types.includes(actionType);
+  return false;
+}
+
+/**
+ * Normalise a sport id or human name ("Fútbol", "Microfútbol") to the ASCII
+ * lowercase key used in GOAL_ACTION_TYPES ("futbol", "microfutbol").
+ */
+export function normalizeSportKey(sport: string): string {
+  return sport
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // strip diacritics
+}
 
 /**
  * Check whether a given action type contributes to the score in a sport.

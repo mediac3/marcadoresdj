@@ -337,10 +337,20 @@ function teamSubInfo(gender: string, ageCategory: string): string | null {
 }
 
 function isGoalAction(sportName: string, actionType: string): boolean {
-  const key = sportName.toLowerCase();
+  // sportName arrives as the human label ("Fútbol", "Microfútbol"); normalise
+  // to the ASCII lowercase key used by GOAL_ACTION_TYPES, and compare against
+  // the real SportAction.name values stored in EventAction.actionType.
+  const key = sportName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
   const types = GOAL_ACTION_TYPES[key];
   if (!types) return false;
   return types.includes(actionType);
+}
+
+function isOwnGoalAction(actionType: string): boolean {
+  return actionType === 'OWN_GOAL';
 }
 
 function isGoalOrCard(action: DetailAction, sportName: string): boolean {
@@ -351,6 +361,25 @@ function isGoalOrCard(action: DetailAction, sportName: string): boolean {
     label.includes('roja') ||
     label.includes('tarjeta')
   );
+}
+
+/**
+ * Resolve which team a goal/scoring action belongs to in the summary.
+ * Own goals count for the opposite team (mirrors event-scores.ts backend
+ * logic). Actions without a player resolve to null ("Sin asignar").
+ */
+function resolveGoalTeamId(
+  action: DetailAction,
+  teamAId: string,
+  teamBId: string,
+): string | null {
+  const teamId = action.player?.teamId ?? null;
+  if (!teamId) return null;
+  if (isOwnGoalAction(action.actionType)) {
+    if (teamId === teamAId) return teamBId;
+    if (teamId === teamBId) return teamAId;
+  }
+  return teamId;
 }
 
 function getTeamLabel(
@@ -767,14 +796,29 @@ function ExpandedEventPanel({
   const summaryA = useMemo(() => {
     if (!expandedData) return [];
     return expandedData.actions
-      .filter((a) => isGoalOrCard(a, expandedData.sportName) && a.player?.teamId === event.teamAId)
+      .filter((a) => {
+        if (!isGoalOrCard(a, expandedData.sportName)) return false;
+        // Goals: own goals count for the opposite team; cards: direct team.
+        const isGoal = isGoalAction(expandedData.sportName, a.actionType);
+        const teamId = isGoal
+          ? resolveGoalTeamId(a, event.teamAId, event.teamBId)
+          : a.player?.teamId ?? null;
+        return teamId === event.teamAId;
+      })
       .sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0));
   }, [expandedData, event.teamAId]);
 
   const summaryB = useMemo(() => {
     if (!expandedData) return [];
     return expandedData.actions
-      .filter((a) => isGoalOrCard(a, expandedData.sportName) && a.player?.teamId === event.teamBId)
+      .filter((a) => {
+        if (!isGoalOrCard(a, expandedData.sportName)) return false;
+        const isGoal = isGoalAction(expandedData.sportName, a.actionType);
+        const teamId = isGoal
+          ? resolveGoalTeamId(a, event.teamAId, event.teamBId)
+          : a.player?.teamId ?? null;
+        return teamId === event.teamBId;
+      })
       .sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0));
   }, [expandedData, event.teamBId]);
 

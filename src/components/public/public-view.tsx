@@ -41,6 +41,12 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible';
+import { useOpenTournaments } from '@/hooks/use-collapsed-tournaments';
+import {
   Avatar,
   AvatarImage,
   AvatarFallback,
@@ -1323,10 +1329,12 @@ function TournamentSection({
   tournament,
   onEventClick,
   liveElapsedFn,
+  hideHeader = false,
 }: {
   tournament: TournamentGroup;
   onEventClick: (eventId: string) => void;
   liveElapsedFn: (event: PublicEvent) => number | null;
+  hideHeader?: boolean;
 }) {
   const [activeView, setActiveView] = useState<'matches' | 'standings' | 'bracket' | 'scorers'>('matches');
   const [standings, setStandings] = useState<Array<{ phaseId: string; phaseName: string; phaseOrder: number; standings: StandingRow[] }>>([]);
@@ -1405,7 +1413,8 @@ function TournamentSection({
 
   return (
     <div className="space-y-3">
-      {/* Tournament header */}
+      {/* Tournament header (oculta cuando se renderiza dentro de un Collapsible) */}
+      {!hideHeader && (
       <div className="flex items-center gap-3">
         {tournament.logo ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -1432,6 +1441,7 @@ function TournamentSection({
           </span>
         )}
       </div>
+      )}
 
       {/* View tabs */}
       <div className="flex gap-1">
@@ -1795,6 +1805,8 @@ export function PublicView() {
   const [nonTournamentEvents, setNonTournamentEvents] = useState<PublicEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'tournaments' | 'grid'>('tournaments');
+  // Tournaments collapsed by default; visitor expands to see content.
+  const { isOpen: isTournamentOpen, toggle: toggleTournament } = useOpenTournaments();
   const [filterCountryId, setFilterCountryId] = useState<string | null>(null);
   const [filterDepartmentId, setFilterDepartmentId] = useState<string | null>(null);
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
@@ -2597,25 +2609,79 @@ export function PublicView() {
             ))}
           </div>
         ) : viewMode === 'tournaments' && tournaments.length > 0 ? (
-          /* ── TOURNAMENT VIEW ── */
-          <div className="space-y-6">
-            {tournaments.map((t) => (
-              <div
-                key={t.id}
-                className="rounded-xl p-4 space-y-1"
-                style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-custom)',
-                  boxShadow: 'var(--shadow)',
-                }}
-              >
-                <TournamentSection
-                  tournament={t}
-                  onEventClick={(eventId) => handleToggle(eventId)}
-                  liveElapsedFn={getLiveElapsed}
-                />
-              </div>
-            ))}
+          /* ── TOURNAMENT VIEW (torneos colapsados por defecto, expandibles) ── */
+          <div className="space-y-4">
+            {tournaments.map((t) => {
+              const tEvents = t.phases.flatMap((p) => p.events);
+              const tLive = tEvents.filter((e) => e.status === 'LIVE' || e.status === 'PAUSED').length;
+              const open = isTournamentOpen(t.id);
+              return (
+                <Collapsible
+                  key={t.id}
+                  open={open}
+                  onOpenChange={() => toggleTournament(t.id)}
+                  className="rounded-xl overflow-hidden"
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: `1px solid ${open ? 'var(--accent)' : 'var(--border-custom)'}`,
+                    boxShadow: 'var(--shadow)',
+                  }}
+                >
+                  {/* Trigger: cabecera resumen siempre visible */}
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 p-4 text-left transition-colors hover:bg-[var(--bg-secondary)]"
+                      aria-expanded={open}
+                    >
+                      {t.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.logo} alt="" className="size-8 object-contain rounded shrink-0" />
+                      ) : (
+                        <div className="size-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--accent)', color: '#fff' }}>
+                          <Trophy className="size-4" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-extrabold truncate" style={{ color: 'var(--text-primary)' }}>
+                          {t.name}
+                        </h3>
+                        {t.sport && (
+                          <p className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+                            {t.sport.icon} {t.sport.name}
+                          </p>
+                        )}
+                      </div>
+                      {tLive > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase shrink-0" style={{ color: 'var(--accent-red)' }}>
+                          <span className="inline-block size-1.5 rounded-full animate-pulse" style={{ background: 'var(--live-dot)' }} />
+                          {tLive} en vivo
+                        </span>
+                      )}
+                      <span className="text-[10px] font-medium shrink-0 hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
+                        {tEvents.length} {tEvents.length === 1 ? 'partido' : 'partidos'}
+                      </span>
+                      {open ? (
+                        <ChevronUp className="size-4 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                      ) : (
+                        <ChevronDown className="size-4 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  {/* Content: sección completa del torneo */}
+                  <CollapsibleContent>
+                    <div className="px-4 pb-4 pt-1">
+                      <TournamentSection
+                        tournament={t}
+                        hideHeader
+                        onEventClick={(eventId) => handleToggle(eventId)}
+                        liveElapsedFn={getLiveElapsed}
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })}
 
             {/* Non-tournament events (grid) */}
             {displayedEvents.length > 0 && (

@@ -120,18 +120,6 @@ export function normalizeSportKey(sport: string): string {
     .replace(/[\u0300-\u036f]/g, ''); // strip diacritics
 }
 
-/**
- * Check whether a given action type contributes to the score in a sport.
- */
-export function isScoringAction(
-  sportId: string,
-  actionType: string,
-): boolean {
-  const types = GOAL_ACTION_TYPES[sportId];
-  if (!types) return false;
-  return types.includes(actionType);
-}
-
 // ── Event status labels ──────────────────────────────────────────────────────
 
 export const EVENT_STATUS_LABELS: Record<string, string> = {

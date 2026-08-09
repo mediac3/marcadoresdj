@@ -19,6 +19,7 @@ import {
   Newspaper,
   Shield,
   SlidersHorizontal as SlidersIcon,
+  FileText,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -44,6 +45,7 @@ import { AnalyticsPanel } from '@/components/admin/analytics-panel';
 import { SettingsPanel } from '@/components/admin/settings-panel';
 import { PublicationsPanel } from '@/components/admin/publications-panel';
 import { PermissionsPanel } from '@/components/admin/permissions-panel';
+import { TermsPanel } from '@/components/admin/terms-panel';
 import { TournamentsPanel } from '@/components/admin/tournaments-panel';
 import { EventWizard } from '@/components/events/event-wizard';
 import { EventListView } from '@/components/events/event-list-view';
@@ -74,6 +76,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Publicaciones', icon: Newspaper, view: { page: 'ADMIN_PUBLICATIONS' }, adminOnly: true, sectionKey: 'publications' },
   { label: 'Ajustes', icon: SlidersIcon, view: { page: 'ADMIN_SETTINGS' }, adminOnly: true, sectionKey: 'settings' },
   { label: 'Torneos', icon: Trophy, view: { page: 'ADMIN_TOURNAMENTS' }, adminOnly: true, sectionKey: 'tournaments' },
+  { label: 'Términos', icon: FileText, view: { page: 'ADMIN_TERMS' }, adminOnly: true, sectionKey: 'terms' },
   { label: 'Permisos', icon: Shield, view: { page: 'ADMIN_PERMISSIONS' }, adminOnly: true, sectionKey: 'permissions' },
 ];
 
@@ -142,6 +145,8 @@ function ViewRouter() {
       return <PermissionsPanel />;
     case 'ADMIN_TOURNAMENTS':
       return <TournamentsPanel />;
+    case 'ADMIN_TERMS':
+      return <TermsPanel />;
     default:
       return <PlaceholderView title="Página no encontrada" />;
   }

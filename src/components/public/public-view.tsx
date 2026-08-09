@@ -1286,10 +1286,12 @@ function TournamentSection({
   tournament,
   onEventClick,
   liveElapsedFn,
+  hideHeader = false,
 }: {
   tournament: TournamentGroup;
   onEventClick: (eventId: string) => void;
   liveElapsedFn: (event: PublicEvent) => number | null;
+  hideHeader?: boolean;
 }) {
   const [activeView, setActiveView] = useState<'matches' | 'standings' | 'bracket' | 'scorers'>('matches');
   const [standings, setStandings] = useState<Array<{ phaseId: string; phaseName: string; phaseOrder: number; standings: StandingRow[] }>>([]);
@@ -1368,9 +1370,9 @@ function TournamentSection({
 
   return (
     <div className="space-y-3">
-      {/* Tournament header */}
-      <div className="flex items-center gap-3">
-        {tournament.logo ? (
+      {/* Tournament header (hidden when rendered inside a collapsible wrapper that already shows it) */}
+      {!hideHeader && (
+      <div className="flex items-center gap-3">        {tournament.logo ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={tournament.logo} alt="" className="size-8 object-contain rounded" />
         ) : (
@@ -1395,6 +1397,7 @@ function TournamentSection({
           </span>
         )}
       </div>
+      )}
 
       {/* View tabs */}
       <div className="flex gap-1">
@@ -1769,6 +1772,10 @@ export function PublicView() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedData, setExpandedData] = useState<ExpandedData | null>(null);
   const [expandedLoading, setExpandedLoading] = useState(false);
+  // Tournaments are collapsed by default on the main view; the visitor expands
+  // them by clicking the tournament header. We track which ones are OPEN to
+  // keep new/refreshed tournaments collapsed unless explicitly toggled.
+  const [openTournaments, setOpenTournaments] = useState<Set<string>>(new Set());
   const expandedDataRef = useRef<ExpandedData | null>(null);
 
   /* ── Derived: expanded event from full events array (survives pagination) ── */
@@ -2147,6 +2154,22 @@ export function PublicView() {
       }
     },
     [expandedId, fetchExpanded],
+  );
+
+  /* ── Toggle tournament collapse (collapsed by default; click to open) ── */
+  const toggleTournament = useCallback((tournamentId: string) => {
+    setOpenTournaments((prev) => {
+      const next = new Set(prev);
+      if (next.has(tournamentId)) next.delete(tournamentId);
+      else next.add(tournamentId);
+      return next;
+    });
+  }, []);
+
+  /* ── Count total events across all phases of a tournament ── */
+  const countTournamentEvents = useCallback(
+    (t: TournamentGroup) => t.phases.reduce((sum, p) => sum + p.events.length, 0),
+    [],
   );
 
   /* ── Compute live elapsed seconds ── */
@@ -2560,25 +2583,89 @@ export function PublicView() {
             ))}
           </div>
         ) : viewMode === 'tournaments' && tournaments.length > 0 ? (
-          /* ── TOURNAMENT VIEW ── */
-          <div className="space-y-6">
-            {tournaments.map((t) => (
-              <div
-                key={t.id}
-                className="rounded-xl p-4 space-y-1"
-                style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-custom)',
-                  boxShadow: 'var(--shadow)',
-                }}
-              >
-                <TournamentSection
-                  tournament={t}
-                  onEventClick={(eventId) => handleToggle(eventId)}
-                  liveElapsedFn={getLiveElapsed}
-                />
-              </div>
-            ))}
+          /* ── TOURNAMENT VIEW (collapsed by default, expand on click) ── */
+          <div className="space-y-3">
+            {tournaments.map((t) => {
+              const eventCount = countTournamentEvents(t);
+              const liveCount = t.phases
+                .flatMap((p) => p.events)
+                .filter((e) => e.status === 'LIVE' || e.status === 'PAUSED').length;
+              const isOpen = openTournaments.has(t.id);
+              return (
+                <div
+                  key={t.id}
+                  className="rounded-xl overflow-hidden"
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-custom)',
+                    boxShadow: 'var(--shadow)',
+                  }}
+                >
+                  {/* Collapsible header (click to toggle) */}
+                  <button
+                    type="button"
+                    onClick={() => toggleTournament(t.id)}
+                    aria-expanded={isOpen}
+                    aria-controls={`tournament-body-${t.id}`}
+                    className="w-full flex items-center gap-3 p-4 text-left transition-colors hover:opacity-90"
+                  >
+                    {t.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.logo} alt="" className="size-8 object-contain rounded shrink-0" />
+                    ) : (
+                      <div className="size-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--accent)', color: '#fff' }}>
+                        <Trophy className="size-4" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-extrabold truncate" style={{ color: 'var(--text-primary)' }}>
+                        {t.name}
+                      </h3>
+                      {t.sport && (
+                        <p className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+                          {t.sport.icon} {t.sport.name}
+                        </p>
+                      )}
+                    </div>
+                    {liveCount > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase shrink-0" style={{ color: 'var(--accent-red)' }}>
+                        <span className="inline-block size-1.5 rounded-full animate-pulse" style={{ background: 'var(--live-dot)' }} />
+                        {liveCount} en vivo
+                      </span>
+                    )}
+                    <span
+                      className="inline-flex items-center justify-center text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                      style={{
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-muted)',
+                        border: '1px solid var(--border-custom)',
+                      }}
+                    >
+                      {eventCount} {eventCount === 1 ? 'evento' : 'eventos'}
+                    </span>
+                    <ChevronRight
+                      className="size-4 shrink-0 transition-transform"
+                      style={{
+                        color: 'var(--text-muted)',
+                        transform: isOpen ? 'rotate(90deg)' : 'none',
+                      }}
+                    />
+                  </button>
+
+                  {/* Body: only render when open (keeps heavy TournamentSection work lazy) */}
+                  {isOpen && (
+                    <div id={`tournament-body-${t.id}`} className="px-4 pb-4 pt-1 space-y-1">
+                      <TournamentSection
+                        tournament={t}
+                        onEventClick={(eventId) => handleToggle(eventId)}
+                        liveElapsedFn={getLiveElapsed}
+                        hideHeader
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Non-tournament events (grid) */}
             {displayedEvents.length > 0 && (

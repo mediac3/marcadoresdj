@@ -26,6 +26,7 @@ import {
   Table2,
   GitBranch,
   Target,
+  Plus,
 } from 'lucide-react';
 import { LocationSelector } from '@/components/locations/location-selector';
 import {
@@ -52,6 +53,7 @@ import {
 } from '@/components/ui/popover';
 import { useAppStore, type ThemeName } from '@/lib/store';
 import { GOAL_ACTION_TYPES, normalizeSportKey } from '@/lib/constants';
+import { PublicEventWizard } from '@/components/public/public-event-wizard';
 
 /* ════════════════════════════════════════════════════════════════════════════
    STREAMING IFRAME (memoised — only re-renders when URL changes)
@@ -1765,6 +1767,7 @@ export function PublicView() {
   const [filterDepartmentId, setFilterDepartmentId] = useState<string | null>(null);
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
   const [activeTab, setActiveTab] = useState<'live' | 'scheduled'>('live');
@@ -2306,6 +2309,20 @@ export function PublicView() {
               </Button>
             ))}
             <Separator orientation="vertical" className="h-5 mx-1" />
+            <button
+              type="button"
+              onClick={() => setShowCreateWizard(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold min-h-[44px] transition-colors"
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+              }}
+              title="Crea un evento público"
+            >
+              <Plus className="size-3.5" />
+              <span className="hidden sm:inline">Crear evento</span>
+              <span className="sm:hidden">Crear</span>
+            </button>
             <a
               href="#login"
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold min-h-[44px]"
@@ -3109,6 +3126,12 @@ export function PublicView() {
           )}
         </div>
       </footer>
+
+      {/* ── Public event creation wizard ── */}
+      <PublicEventWizard
+        open={showCreateWizard}
+        onClose={() => setShowCreateWizard(false)}
+      />
     </div>
   );
 }

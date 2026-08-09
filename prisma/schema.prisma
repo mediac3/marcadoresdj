@@ -24,6 +24,7 @@ model User {
   comments          Comment[]
   eventAccessEntries EventAccess[]  @relation("UserEventAccess")
   tournamentsCreated  Tournament[]  @relation("TournamentCreator")
+  termsAcceptances    EventTermsAcceptance[] @relation("TermsAcceptanceGuest")
 }
 
 model Sport {
@@ -171,6 +172,7 @@ model Event {
   actions        EventAction[]
   comments       Comment[]
   eventAccessEntries EventAccess[]  @relation("EventAccessEntry")
+  termsAcceptance EventTermsAcceptance?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }
@@ -354,4 +356,23 @@ model TournamentPhase {
   updatedAt    DateTime   @updatedAt
 
   @@unique([tournamentId, name])
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TERMS & CONDITIONS ACCEPTANCE AUDIT
+   ════════════════════════════════════════════════════════════════════════════ */
+
+model EventTermsAcceptance {
+  id          String   @id @default(cuid())
+  eventId     String   @unique
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  guestUserId String
+  guestUser   User     @relation("TermsAcceptanceGuest", fields: [guestUserId], references: [id], onDelete: Cascade)
+  termsVersion Int
+  acceptedAt  DateTime @default(now())
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

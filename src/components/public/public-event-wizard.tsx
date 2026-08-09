@@ -158,8 +158,9 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
       .catch(() => setStep(1));
 
     setSportsLoading(true);
-    apiGet<{ success: boolean; sports: Sport[] }>('/api/sports')
-      .then((res) => setSports(res.sports.filter((s) => s.isActive)))
+    // Public endpoint (no auth) so unauthenticated visitors can pick a sport.
+    apiGet<{ success: boolean; sports: Sport[] }>('/api/public/sports')
+      .then((res) => setSports(res.sports))
       .catch(() => {})
       .finally(() => setSportsLoading(false));
   }, [open]);
@@ -620,12 +621,13 @@ function TeamPicker({
   const fetchTeams = useCallback(async () => {
     setLoading(true);
     try {
+      // Public endpoint (no auth) so unauthenticated visitors can pick teams.
       const res = await apiGet<{ success: boolean; teams: Team[] }>(
-        `/api/teams?sportId=${sport.id}`,
+        `/api/public/teams?sportId=${sport.id}`,
       );
       setTeams(res.teams.filter((t) => t.id !== excludedTeamId));
     } catch {
-      // ignore — visitor may have no token yet
+      // ignore — network error; visitor can still create a new team
     } finally {
       setLoading(false);
     }

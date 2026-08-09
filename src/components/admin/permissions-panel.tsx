@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { apiGet, apiPost, apiPut, apiDelete } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -96,6 +97,7 @@ const STATUS_COLORS: Record<string, string> = {
 /* ── Component ─────────────────────────────────────────────────────────────── */
 
 export function PermissionsPanel() {
+  const { toast } = useToast();
   /* ── Tab state ── */
   const [activeTab, setActiveTab] = useState<'sections' | 'event-access'>('sections');
 
@@ -198,10 +200,23 @@ export function PermissionsPanel() {
   const handleSavePermissions = async () => {
     try {
       setSavingPermissions(true);
-      await apiPost('/api/admin/permissions', { permissions });
+      // The endpoint exposes PUT (not POST); using apiPost returned 405 and was
+      // swallowed by the previous silent catch, so changes never persisted.
+      await apiPut('/api/admin/permissions', { permissions });
       setPermissionsChanged(false);
-    } catch {
-      // silently fail
+      toast({
+        title: 'Permisos guardados',
+        description: 'Los cambios se aplicaron correctamente.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Error al guardar',
+        description:
+          err instanceof Error
+            ? err.message
+            : 'No se pudieron guardar los permisos.',
+        variant: 'destructive',
+      });
     } finally {
       setSavingPermissions(false);
     }

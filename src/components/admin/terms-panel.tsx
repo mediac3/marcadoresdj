@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { FileText, Loader2, Check, Eye, Code, AlertCircle, History } from 'lucide-react';
+import { FileText, Loader2, Check, Eye, Code, AlertCircle, History, RotateCcw, SplitSquareHorizontal } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -72,7 +73,6 @@ export function TermsPanel() {
   const [content, setContent] = useState(DEFAULT_TERMS);
   const [enabled, setEnabled] = useState(true);
   const [loadedVersion, setLoadedVersion] = useState(0);
-  const [showPreview, setShowPreview] = useState(false);
 
   /* ── Acceptance audit history ── */
   const [acceptances, setAcceptances] = useState<Array<{
@@ -86,14 +86,16 @@ export function TermsPanel() {
   }>>([]);
   const [acceptancesLoading, setAcceptancesLoading] = useState(false);
 
-  const hasContentChanged = useMemo(
-    () => content.trim() !== DEFAULT_TERMS.trim() || loadedVersion > 0,
-    [content, loadedVersion],
-  );
   // El botón Guardar se habilita cuando hay cambios reales respecto a lo cargado.
   const [initialContent, setInitialContent] = useState(DEFAULT_TERMS);
   const [initialEnabled, setInitialEnabled] = useState(true);
   const hasChanges = content !== initialContent || enabled !== initialEnabled;
+
+  /* ── Editor view mode: edit | split | preview ── */
+  const [viewMode, setViewMode] = useState<'edit' | 'split' | 'preview'>('edit');
+
+  /* ── Transient "saved" confirmation ── */
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   /* ── Load ── */
   const fetchTerms = useCallback(async () => {
@@ -153,6 +155,7 @@ export function TermsPanel() {
       setLoadedVersion(nextVersion);
       setInitialContent(content);
       setInitialEnabled(enabled);
+      setSavedAt(Date.now());
       toast({
         title: 'Términos guardados',
         description: `Versión ${nextVersion} publicada correctamente.`,
@@ -173,6 +176,15 @@ export function TermsPanel() {
       setSaving(false);
     }
   }, [content, enabled, loadedVersion, toast]);
+
+  /* ── Reset / restore helpers ── */
+  const handleReset = () => {
+    setContent(initialContent);
+    setEnabled(initialEnabled);
+  };
+  const handleRestoreDefault = () => {
+    setContent(DEFAULT_TERMS);
+  };
 
   if (loading) {
     return (
@@ -195,11 +207,11 @@ export function TermsPanel() {
         <div className="flex items-center gap-3">
           <div
             className="flex items-center justify-center size-8 rounded-lg"
-            style={{ background: 'var(--accent)20' }}
+            style={{ background: 'color-mix(in srgb, var(--accent) 14%, transparent)' }}
           >
-            <FileText className="size-4.5" style={{ color: 'var(--accent)' }} />
+            <FileText className="size-[1.125rem]" style={{ color: 'var(--accent)' }} />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h1
               className="text-xl md:text-2xl font-bold"
               style={{ color: 'var(--text-primary)' }}
@@ -213,6 +225,23 @@ export function TermsPanel() {
               Documento que los visitantes deben aceptar al crear un evento público
             </p>
           </div>
+          {loadedVersion > 0 && (
+            <span
+              className="text-[10px] font-bold px-2 py-1 rounded-full shrink-0"
+              style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}
+            >
+              v{loadedVersion}
+            </span>
+          )}
+          {savedAt && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-semibold shrink-0"
+              style={{ color: 'var(--score-green)' }}
+            >
+              <Check className="size-3" />
+              Guardado
+            </span>
+          )}
         </div>
       </div>
 
@@ -265,81 +294,171 @@ export function TermsPanel() {
       </div>
 
       {/* ── Editor ── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <Label
           className="text-sm font-semibold"
           style={{ color: 'var(--text-primary)' }}
         >
-          Contenido {loadedVersion > 0 && `(versión actual: ${loadedVersion})`}
+          Contenido
+          <span className="ml-2 text-[11px] font-normal" style={{ color: 'var(--text-muted)' }}>
+            {hasChanges
+              ? `borrador → v${loadedVersion + 1} al guardar`
+              : loadedVersion > 0
+                ? `publicado: v${loadedVersion}`
+                : 'sin publicar'}
+          </span>
         </Label>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5 text-xs"
-          onClick={() => setShowPreview((s) => !s)}
-          style={{ color: 'var(--text-secondary)' }}
+        {/* View mode toggle: Editar | Dividido | Vista previa */}
+        <div
+          className="flex rounded-lg p-0.5"
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-custom)' }}
         >
-          {showPreview ? <Code className="size-3.5" /> : <Eye className="size-3.5" />}
-          {showPreview ? 'Editar' : 'Vista previa'}
-        </Button>
+          {([
+            { key: 'edit', label: 'Editar', icon: Code },
+            { key: 'split', label: 'Dividido', icon: SplitSquareHorizontal },
+            { key: 'preview', label: 'Preview', icon: Eye },
+          ] as const).map((opt) => {
+            const Icon = opt.icon;
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setViewMode(opt.key)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors"
+                style={{
+                  background: viewMode === opt.key ? 'var(--accent)' : 'transparent',
+                  color: viewMode === opt.key ? '#fff' : 'var(--text-muted)',
+                }}
+              >
+                <Icon className="size-3" />
+                <span className="hidden sm:inline">{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {showPreview ? (
+      {/* Editor / Preview area */}
+      {(viewMode === 'edit' || viewMode === 'split') && (
+        viewMode === 'split' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <Textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={18}
+              placeholder="Escribe los términos en formato Markdown..."
+              className="font-mono text-xs"
+              style={{
+                background: 'var(--bg-card)',
+                borderColor: 'var(--border-custom)',
+                color: 'var(--text-primary)',
+                resize: 'vertical',
+                minHeight: '300px',
+              }}
+            />
+            <div
+              className="rounded-lg p-4 min-h-[300px] prose prose-sm dark:prose-invert max-w-none overflow-y-auto"
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-custom)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              {content ? (
+                <ReactMarkdown>{content}</ReactMarkdown>
+              ) : (
+                <span style={{ color: 'var(--text-muted)' }}>— Sin contenido —</span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <Textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={18}
+            placeholder="Escribe los términos en formato Markdown..."
+            className="font-mono text-xs"
+            style={{
+              background: 'var(--bg-card)',
+              borderColor: 'var(--border-custom)',
+              color: 'var(--text-primary)',
+              resize: 'vertical',
+              minHeight: '300px',
+            }}
+          />
+        )
+      )}
+
+      {viewMode === 'preview' && (
         <div
-          className="rounded-lg p-4 min-h-[300px] prose-sm max-w-none overflow-y-auto"
+          className="rounded-lg p-4 min-h-[300px] prose prose-sm dark:prose-invert max-w-none overflow-y-auto"
           style={{
             background: 'var(--bg-card)',
             border: '1px solid var(--border-custom)',
             color: 'var(--text-primary)',
-            whiteSpace: 'pre-wrap',
           }}
         >
-          {content || '— Sin contenido —'}
+          {content ? (
+            <ReactMarkdown>{content}</ReactMarkdown>
+          ) : (
+            <span style={{ color: 'var(--text-muted)' }}>— Sin contenido —</span>
+          )}
         </div>
-      ) : (
-        <Textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          rows={18}
-          placeholder="Escribe los términos en formato Markdown..."
-          className="font-mono text-xs"
-          style={{
-            background: 'var(--bg-card)',
-            borderColor: 'var(--border-custom)',
-            color: 'var(--text-primary)',
-            resize: 'vertical',
-            minHeight: '300px',
-          }}
-        />
       )}
 
-      {/* ── Save ── */}
-      <div className="flex items-center justify-end pt-2 gap-3">
-        {hasContentChanged && (
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Guardar generará una nueva versión que exigirá re-aceptación
-          </span>
-        )}
-        <Button
-          disabled={!hasChanges || saving}
-          className="gap-2 text-sm font-semibold"
-          style={{
-            background: hasChanges ? 'var(--accent)' : 'var(--bg-secondary)',
-            color: hasChanges ? '#fff' : 'var(--text-muted)',
-            borderColor: hasChanges ? 'var(--accent)' : 'var(--border-custom)',
-            border: '1px solid',
-            cursor: hasChanges ? 'pointer' : 'default',
-            opacity: hasChanges ? 1 : 0.6,
-          }}
-          onClick={handleSave}
-        >
-          {saving ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : hasChanges ? (
-            <Check className="size-4" />
-          ) : null}
-          {saving ? 'Guardando...' : 'Guardar y publicar'}
-        </Button>
+      {/* ── Save / Reset / Restore ── */}
+      <div className="flex items-center justify-between pt-2 gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!hasChanges || saving}
+            onClick={handleReset}
+            className="gap-1.5 text-xs"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <RotateCcw className="size-3.5" />
+            Restablecer
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={saving}
+            onClick={handleRestoreDefault}
+            className="gap-1.5 text-xs"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <FileText className="size-3.5" />
+            Restaurar predeterminado
+          </Button>
+        </div>
+        <div className="flex items-center gap-3">
+          {hasChanges && (
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Guardar generará v{loadedVersion + 1} y exigirá re-aceptación
+            </span>
+          )}
+          <Button
+            disabled={!hasChanges || saving}
+            className="gap-2 text-sm font-semibold"
+            style={{
+              background: hasChanges ? 'var(--accent)' : 'var(--bg-secondary)',
+              color: hasChanges ? '#fff' : 'var(--text-muted)',
+              borderColor: hasChanges ? 'var(--accent)' : 'var(--border-custom)',
+              border: '1px solid',
+              cursor: hasChanges ? 'pointer' : 'default',
+              opacity: hasChanges ? 1 : 0.6,
+            }}
+            onClick={handleSave}
+          >
+            {saving ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : hasChanges ? (
+              <Check className="size-4" />
+            ) : null}
+            {saving ? 'Guardando...' : 'Guardar y publicar'}
+          </Button>
+        </div>
       </div>
 
       {/* ── Acceptance audit history ── */}

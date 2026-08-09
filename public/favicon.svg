@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Fondo circular con gradiente -->
+  <defs>
+    <radialGradient id="ballGrad" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#ff9d3d"/>
+      <stop offset="60%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#c2410c"/>
+    </radialGradient>
+    <linearGradient id="boltGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fde047"/>
+      <stop offset="100%" stop-color="#facc15"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Balón de baloncesto -->
+  <circle cx="32" cy="32" r="26" fill="url(#ballGrad)" stroke="#7c2d12" stroke-width="1.5"/>
+
+  <!-- Líneas del balón de baloncesto -->
+  <g fill="none" stroke="#7c2d12" stroke-width="2" stroke-linecap="round">
+    <!-- Línea vertical central -->
+    <path d="M 32 6 Q 28 32 32 58"/>
+    <!-- Línea horizontal central (curva por perspectiva) -->
+    <path d="M 6 32 Q 32 38 58 32"/>
+    <!-- Curvas laterales -->
+    <path d="M 12 14 Q 22 32 12 50"/>
+    <path d="M 52 14 Q 42 32 52 50"/>
+  </g>
+
+  <!-- Rayo (bolt) sobre el balón -->
+  <path d="M 36 16 L 24 36 L 32 36 L 28 50 L 42 28 L 34 28 Z"
+        fill="url(#boltGrad)"
+        stroke="#a16207"
+        stroke-width="1"
+        stroke-linejoin="round"/>
+</svg>

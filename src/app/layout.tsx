@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   description: "Sistema de marcadores deportivos en tiempo real con transmisión en vivo, gestión de equipos y eventos deportivos.",
   keywords: ["marcadores", "deportes", "tiempo real", "live scores", "transmisión"],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/favicon.svg",
   },
 };
 

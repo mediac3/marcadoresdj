@@ -70,30 +70,44 @@ export const SPORT_POSITIONS: Record<string, string[]> = {
 // ── Goal / point-scoring action types ────────────────────────────────────────
 // These action names are used to determine which actions count towards the
 // scoreboard (scoreA / scoreB) for each sport.
-
+//
+// Keys are normalized sport slugs (lowercase, no accents). Values are the
+// UPPERCASE actionType identifiers produced by prisma/seed.ts (e.g. GOAL,
+// TWO_POINTS, OWN_GOAL). Comparison is case-insensitive to stay robust.
 export const GOAL_ACTION_TYPES: Record<string, string[]> = {
-  futbol: ['gol', 'autogol'],
-  microfutbol: ['gol', 'autogol'],
-  baloncesto: [
-    'tiro-libre',
-    'canasta-2',
-    'canasta-3',
-  ],
-  handball: ['gol'],
-  voleibol: ['punto'],
-  beisbol: ['carrera'],
+  futbol: ['GOAL', 'OWN_GOAL', 'PENALTY_GOAL', 'FREE_KICK_GOAL'],
+  microfutbol: ['GOAL', 'OWN_GOAL', 'PENALTY_GOAL', 'FREE_KICK_GOAL'],
+  baloncesto: ['FREE_THROW', 'TWO_POINTS', 'THREE_POINTS'],
+  handball: ['GOAL'],
+  voleibol: ['POINT'],
+  beisbol: ['RUN'],
 };
 
 /**
+ * Normalize a sport display name into a slug key: lowercase, accents and
+ * diacritics stripped (e.g. "Fútbol" → "futbol", "Microfútbol" → "microfutbol").
+ */
+export function normalizeSportKey(sportName: string): string {
+  return sportName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
  * Check whether a given action type contributes to the score in a sport.
+ * Accepts either a normalized sport key or a raw sport display name, and
+ * compares the actionType case-insensitively.
  */
 export function isScoringAction(
   sportId: string,
   actionType: string,
 ): boolean {
-  const types = GOAL_ACTION_TYPES[sportId];
+  const key = normalizeSportKey(sportId);
+  const types = GOAL_ACTION_TYPES[key];
   if (!types) return false;
-  return types.includes(actionType);
+  const upper = actionType.toUpperCase();
+  return types.some((t) => t.toUpperCase() === upper);
 }
 
 // ── Event status labels ──────────────────────────────────────────────────────

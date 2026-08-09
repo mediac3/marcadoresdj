@@ -51,7 +51,7 @@ import {
   PopoverContent,
 } from '@/components/ui/popover';
 import { useAppStore, type ThemeName } from '@/lib/store';
-import { GOAL_ACTION_TYPES } from '@/lib/constants';
+import { GOAL_ACTION_TYPES, normalizeSportKey } from '@/lib/constants';
 
 /* ════════════════════════════════════════════════════════════════════════════
    STREAMING IFRAME (memoised — only re-renders when URL changes)
@@ -337,14 +337,21 @@ function teamSubInfo(gender: string, ageCategory: string): string | null {
 }
 
 function isGoalAction(sportName: string, actionType: string): boolean {
-  const key = sportName.toLowerCase();
+  const key = normalizeSportKey(sportName);
   const types = GOAL_ACTION_TYPES[key];
   if (!types) return false;
-  return types.includes(actionType);
+  const upper = actionType.toUpperCase();
+  return types.some((t) => t.toUpperCase() === upper);
 }
+
+// Card action types that should appear in the action summary alongside goals.
+const CARD_ACTION_TYPES = ['YELLOW_CARD', 'RED_CARD', 'SECOND_YELLOW_CARD'];
 
 function isGoalOrCard(action: DetailAction, sportName: string): boolean {
   if (isGoalAction(sportName, action.actionType)) return true;
+  const type = action.actionType.toUpperCase();
+  if (CARD_ACTION_TYPES.includes(type)) return true;
+  // Fallback: detect cards by localized label (covers custom actions).
   const label = action.actionLabel.toLowerCase();
   return (
     label.includes('amarilla') ||

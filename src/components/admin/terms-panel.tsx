@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { FileText, Loader2, Check, Eye, Code, AlertCircle, History, RotateCcw, SplitSquareHorizontal } from 'lucide-react';
+import { FileText, Loader2, Check, Eye, Code, AlertCircle, History, RotateCcw, SplitSquareHorizontal, Users } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -52,6 +53,8 @@ interface TermsSettings {
   termsContent: string;
   termsVersion: string;
   termsEnabled: string;
+  guestInitialCredits?: string;
+  supportWhatsappNumber?: string;
 }
 
 function parseBool(value: string | undefined): boolean {
@@ -74,6 +77,12 @@ export function TermsPanel() {
   const [enabled, setEnabled] = useState(true);
   const [loadedVersion, setLoadedVersion] = useState(0);
 
+  /* ── Wizard configuration (credits + support WhatsApp) ── */
+  const [initialCredits, setInitialCredits] = useState('5');
+  const [supportWhatsapp, setSupportWhatsapp] = useState('573226575422');
+  const [initialCreditsSaved, setInitialCreditsSaved] = useState('5');
+  const [initialSupportWhatsapp, setInitialSupportWhatsapp] = useState('573226575422');
+
   /* ── Acceptance audit history ── */
   const [acceptances, setAcceptances] = useState<Array<{
     id: string;
@@ -86,10 +95,26 @@ export function TermsPanel() {
   }>>([]);
   const [acceptancesLoading, setAcceptancesLoading] = useState(false);
 
+  /* ── Visitors (guest creators with phone + credits + event count) ── */
+  const [visitors, setVisitors] = useState<Array<{
+    id: string;
+    username: string;
+    phone: string | null;
+    phoneDisplay: string;
+    credits: number;
+    eventsCreated: number;
+    createdAt: string;
+  }>>([]);
+  const [visitorsLoading, setVisitorsLoading] = useState(false);
+
   // El botón Guardar se habilita cuando hay cambios reales respecto a lo cargado.
   const [initialContent, setInitialContent] = useState(DEFAULT_TERMS);
   const [initialEnabled, setInitialEnabled] = useState(true);
-  const hasChanges = content !== initialContent || enabled !== initialEnabled;
+  const hasChanges =
+    content !== initialContent ||
+    enabled !== initialEnabled ||
+    initialCredits !== initialCreditsSaved ||
+    supportWhatsapp !== initialSupportWhatsapp;
 
   /* ── Editor view mode: edit | split | preview ── */
   const [viewMode, setViewMode] = useState<'edit' | 'split' | 'preview'>('edit');
@@ -106,11 +131,17 @@ export function TermsPanel() {
       const c = res.termsContent ?? DEFAULT_TERMS;
       const e = parseBool(res.termsEnabled);
       const v = parseInt(res.termsVersion ?? '0', 10) || 0;
+      const ic = res.guestInitialCredits ?? '5';
+      const sw = res.supportWhatsappNumber ?? '573226575422';
       setContent(c);
       setEnabled(e);
       setLoadedVersion(v);
       setInitialContent(c);
       setInitialEnabled(e);
+      setInitialCredits(ic);
+      setSupportWhatsapp(sw);
+      setInitialCreditsSaved(ic);
+      setInitialSupportWhatsapp(sw);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Error al cargar los términos',
@@ -135,10 +166,26 @@ export function TermsPanel() {
     }
   }, [acceptances]);
 
+  /* ── Load visitors (guest creators with phone) ── */
+  const fetchVisitors = useCallback(async () => {
+    setVisitorsLoading(true);
+    try {
+      const res = await apiGet<{ success: boolean; visitors: typeof visitors }>(
+        '/api/admin/visitors',
+      );
+      setVisitors(res.visitors ?? []);
+    } catch {
+      // non-fatal
+    } finally {
+      setVisitorsLoading(false);
+    }
+  }, [visitors]);
+
   useEffect(() => {
     fetchTerms();
     fetchAcceptances();
-  }, [fetchTerms, fetchAcceptances]);
+    fetchVisitors();
+  }, [fetchTerms, fetchAcceptances, fetchVisitors]);
 
   /* ── Save ── */
   const handleSave = useCallback(async () => {
@@ -150,9 +197,13 @@ export function TermsPanel() {
         termsContent: content,
         termsVersion: String(nextVersion),
         termsEnabled: toBoolString(enabled),
+        guestInitialCredits: String(parseInt(initialCredits, 10) || 5),
+        supportWhatsappNumber: supportWhatsapp.trim(),
       };
       await apiPut('/api/admin/settings', body);
       setLoadedVersion(nextVersion);
+      setInitialCreditsSaved(initialCredits);
+      setInitialSupportWhatsapp(supportWhatsapp);
       setInitialContent(content);
       setInitialEnabled(enabled);
       setSavedAt(Date.now());
@@ -181,6 +232,8 @@ export function TermsPanel() {
   const handleReset = () => {
     setContent(initialContent);
     setEnabled(initialEnabled);
+    setInitialCredits(initialCreditsSaved);
+    setSupportWhatsapp(initialSupportWhatsapp);
   };
   const handleRestoreDefault = () => {
     setContent(DEFAULT_TERMS);
@@ -291,6 +344,64 @@ export function TermsPanel() {
           onCheckedChange={setEnabled}
           className="shrink-0 mt-1"
         />
+      </div>
+
+      {/* ── Wizard configuration: credits + support WhatsApp ── */}
+      <div
+        className="grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-xl p-5"
+        style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-custom)',
+        }}
+      >
+        <div className="space-y-1.5">
+          <Label
+            className="text-sm font-semibold block"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            Créditos iniciales por visitante
+          </Label>
+          <p className="text-[11px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+            Eventos que puede crear cada número de WhatsApp antes de agotarse.
+          </p>
+          <Input
+            type="number"
+            min={1}
+            max={100}
+            value={initialCredits}
+            onChange={(e) => setInitialCredits(e.target.value)}
+            className="font-mono text-sm"
+            style={{
+              background: 'var(--bg-secondary)',
+              borderColor: 'var(--border-custom)',
+              color: 'var(--text-primary)',
+            }}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label
+            className="text-sm font-semibold block"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            Número de WhatsApp de soporte
+          </Label>
+          <p className="text-[11px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+            Donde se abre el chat cuando un visitante solicita más créditos.
+            Formato E.164 sin «+» (ej. 573226575422).
+          </p>
+          <Input
+            type="tel"
+            value={supportWhatsapp}
+            onChange={(e) => setSupportWhatsapp(e.target.value)}
+            className="font-mono text-sm"
+            placeholder="573226575422"
+            style={{
+              background: 'var(--bg-secondary)',
+              borderColor: 'var(--border-custom)',
+              color: 'var(--text-primary)',
+            }}
+          />
+        </div>
       </div>
 
       {/* ── Editor ── */}
@@ -541,6 +652,95 @@ export function TermsPanel() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Visitors table (guest creators with phone + credits) ── */}
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-custom)',
+        }}
+      >
+        <div
+          className="flex items-center gap-2 px-5 py-3 border-b"
+          style={{ borderColor: 'var(--border-custom)' }}
+        >
+          <Users className="size-4" style={{ color: '#25D366' }} />
+          <h2 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+            Visitantes
+          </h2>
+          {visitors.length > 0 && (
+            <span
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}
+            >
+              {visitors.length}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={fetchVisitors}
+            disabled={visitorsLoading}
+            className="ml-auto text-[10px] font-semibold transition-colors disabled:opacity-50"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {visitorsLoading ? 'Actualizando...' : 'Actualizar'}
+          </button>
+        </div>
+
+        {visitorsLoading ? (
+          <div className="p-4 space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ) : visitors.length === 0 ? (
+          <p className="text-xs text-center py-6" style={{ color: 'var(--text-muted)' }}>
+            Aún no hay visitantes con teléfono registrado. Aparecerán aquí cuando se
+            creen eventos públicos desde el wizard.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ color: 'var(--text-muted)' }}>
+                  <th className="text-left font-semibold px-3 py-2">WhatsApp</th>
+                  <th className="text-left font-semibold px-3 py-2">Usuario</th>
+                  <th className="text-center font-semibold px-3 py-2">Eventos creados</th>
+                  <th className="text-center font-semibold px-3 py-2">Créditos</th>
+                  <th className="text-left font-semibold px-3 py-2">Registro</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visitors.map((v) => (
+                  <tr
+                    key={v.id}
+                    className="border-t"
+                    style={{ borderColor: 'var(--border-custom)', color: 'var(--text-secondary)' }}
+                  >
+                    <td className="px-3 py-2 font-mono text-[11px]">{v.phoneDisplay}</td>
+                    <td className="px-3 py-2 font-mono text-[11px]">{v.username}</td>
+                    <td className="px-3 py-2 text-center font-bold">{v.eventsCreated}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span
+                        className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                        style={{
+                          background: v.credits > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                          color: v.credits > 0 ? 'var(--score-green)' : 'var(--accent-red)',
+                        }}
+                      >
+                        {v.credits}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {new Date(v.createdAt).toLocaleDateString('es-CO')}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

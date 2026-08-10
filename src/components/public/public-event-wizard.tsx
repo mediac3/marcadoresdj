@@ -19,6 +19,7 @@ import {
   Users,
   Trash2,
   ChevronDown,
+  MessageCircle,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { apiGet, apiPost } from '@/lib/api';
+import {
+  COUNTRY_CODES,
+  getCountry,
+  toE164,
+  isValidE164,
+  detectCountryIso,
+} from '@/lib/phone';
 
 /* ════════════════════════════════════════════════════════════════════════════
    PublicEventWizard (v2)
@@ -108,10 +116,20 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   /* ── Wizard state ── */
-  const [step, setStep] = useState(0); // 0 = terms, 1..4 = steps, 5 = done
+  // 0 = terms, 1 = WhatsApp/phone, 2 = sport, 3 = local, 4 = visitante, 5 = detalles, 6 = done
+  const [step, setStep] = useState(0);
   const [sports, setSports] = useState<Sport[]>([]);
   const [sportsLoading, setSportsLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
+
+  /* ── WhatsApp phone state ── */
+  const [guestInitialCredits, setGuestInitialCredits] = useState(5);
+  const [supportWhatsapp, setSupportWhatsapp] = useState('573226575422');
+  const [phoneCountry, setPhoneCountry] = useState('CO');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneCheck, setPhoneCheck] = useState<{ exists: boolean; credits?: number } | null>(null);
+  const [phoneChecking, setPhoneChecking] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   const [teamA, setTeamA] = useState<TeamSelection>(null);
   const [teamB, setTeamB] = useState<TeamSelection>(null);
@@ -129,6 +147,8 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
     username: string;
     password: string;
     eventName: string;
+    creditsLeft: number;
+    lastCredit: boolean;
   } | null>(null);
   const [copied, setCopied] = useState<'user' | 'pass' | null>(null);
 
@@ -143,6 +163,13 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
     setSelectedSport(null);
     setTeamA(null);
     setTeamB(null);
+    setPhoneNumber('');
+    setPhoneCheck(null);
+    setPhoneError(null);
+
+    // Detect visitor's country from the browser for the phone selector.
+    const detected = detectCountryIso();
+    if (detected) setPhoneCountry(detected);
 
     fetch('/api/admin/settings')
       .then((r) => r.json())
@@ -152,7 +179,9 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
         setTermsEnabled(enabled);
         setTermsVersion(v);
         setTermsContent(data.termsContent ?? '');
-        // If terms not enforced, skip straight to sport selection.
+        setGuestInitialCredits(parseInt(data.guestInitialCredits ?? '5', 10) || 5);
+        setSupportWhatsapp((data.supportWhatsappNumber ?? '573226575422').trim());
+        // If terms not enforced, skip straight to WhatsApp/phone step.
         if (!enabled) setStep(1);
       })
       .catch(() => setStep(1));
@@ -166,11 +195,19 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
   }, [open]);
 
   /* ── Validation per step ── */
+  // 0 = terms, 1 = WhatsApp/phone, 2 = sport, 3 = local, 4 = visitante, 5 = detalles, 6 = done
   const canAdvance = useMemo(() => {
     if (step === 0) return termsEnabled ? termsAccepted : true;
-    if (step === 1) return !!selectedSport;
-    if (step === 2) return isValidTeamSelection(teamA);
-    if (step === 3) {
+    if (step === 1) {
+      // WhatsApp phone step: need a valid number and (if exists) it must be reusable
+      const e164 = toE164(getCountry(phoneCountry).dial, phoneNumber);
+      if (!isValidE164(e164)) return false;
+      if (phoneError) return false;
+      return true;
+    }
+    if (step === 2) return !!selectedSport;
+    if (step === 3) return isValidTeamSelection(teamA);
+    if (step === 4) {
       if (!isValidTeamSelection(teamB)) return false;
       // Teams must differ (both existing → different ids; names must differ)
       const aName = teamA?.mode === 'existing' ? teamA.team.name : teamA?.mode === 'new' ? teamA.name.trim() : '';
@@ -180,17 +217,51 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
       if (aId && bId && aId === bId) return false;
       return aName.toLowerCase() !== bName.toLowerCase();
     }
-    if (step === 4) return true;
+    if (step === 5) return true;
     return false;
-  }, [step, termsEnabled, termsAccepted, selectedSport, teamA, teamB]);
+  }, [step, termsEnabled, termsAccepted, phoneCountry, phoneNumber, phoneError, selectedSport, teamA, teamB]);
+
+  /* ── Check phone uniqueness against the backend ── */
+  const checkPhone = useCallback(async (e164: string) => {
+    if (!isValidE164(e164)) {
+      setPhoneCheck(null);
+      setPhoneError(null);
+      return;
+    }
+    setPhoneChecking(true);
+    setPhoneError(null);
+    try {
+      const res = await fetch('/api/public/check-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: e164 }),
+      });
+      const data = await res.json();
+      setPhoneCheck({ exists: !!data.exists, credits: data.credits });
+      // Phone already registered → it belongs to someone else (visitor has no
+      // session here, so any existing phone is "taken").
+      setPhoneError(data.exists ? 'Este número ya está en uso. Si es tuyo, inicia sesión para gestionar tus eventos.' : null);
+    } catch {
+      // Network error — don't block, let the server validate on submit.
+      setPhoneCheck(null);
+    } finally {
+      setPhoneChecking(false);
+    }
+  }, []);
 
   /* ── Submit: create guest user + teams + event ── */
   const handleSubmit = useCallback(async () => {
     if (!selectedSport || !isValidTeamSelection(teamA) || !isValidTeamSelection(teamB)) return;
+    const phoneE164 = toE164(getCountry(phoneCountry).dial, phoneNumber);
+    if (!isValidE164(phoneE164)) {
+      setError('Ingresa un número de WhatsApp válido');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       const payload: Record<string, unknown> = {
+        phone: phoneE164,
         sportId: selectedSport.id,
         name: eventName.trim() || null,
         scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
@@ -229,6 +300,8 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
         password: string;
         token: string;
         event?: { name: string | null };
+        credits?: number;
+        lastCredit?: boolean;
       }>('/api/public/events/create', payload);
 
       if (!res.success || !res.token) {
@@ -253,8 +326,10 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
         username: res.user.username,
         password: res.password,
         eventName: res.event?.name || `${aName} vs ${bName}`,
+        creditsLeft: res.credits ?? 0,
+        lastCredit: !!res.lastCredit,
       });
-      setStep(5);
+      setStep(6);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Error al crear el evento',
@@ -262,7 +337,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
     } finally {
       setSubmitting(false);
     }
-  }, [selectedSport, teamA, teamB, eventName, scheduledAt, location, streamingUrl, termsEnabled, termsVersion]);
+  }, [selectedSport, teamA, teamB, eventName, scheduledAt, location, streamingUrl, termsEnabled, termsVersion, phoneCountry, phoneNumber]);
 
   /* ── Finish: reload so the store hydrates with the guest identity ── */
   const handleFinish = useCallback(() => {
@@ -277,7 +352,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
     setTimeout(() => setCopied(null), 1500);
   };
 
-  const stepLabel = step === 0 ? 'Términos' : step === 5 ? 'Listo' : ['Deporte', 'Local', 'Visitante', 'Detalles'][step - 1];
+  const stepLabel = step === 0 ? 'Términos' : step === 6 ? 'Listo' : ['WhatsApp', 'Deporte', 'Local', 'Visitante', 'Detalles'][step - 1];
 
   /* ══════════════════════════════════════════════════════════════════════════
      RENDER
@@ -357,8 +432,128 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
           </div>
         )}
 
-        {/* ═══ STEP 1 — SPORT ═══ */}
+        {/* ═══ STEP 1 — WHATSAPP PHONE ═══ */}
         {step === 1 && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <MessageCircle className="size-5" style={{ color: '#25D366' }} />
+              <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+                Tu WhatsApp
+              </h3>
+            </div>
+            <p className="text-xs leading-snug" style={{ color: 'var(--text-secondary)' }}>
+              Necesitamos un número de WhatsApp válido para crear tu evento. Se
+              permiten hasta <strong style={{ color: 'var(--text-primary)' }}>{guestInitialCredits}</strong> eventos
+              por número.
+            </p>
+
+            {/* Country + phone row */}
+            <div className="flex items-stretch gap-2">
+              <select
+                value={phoneCountry}
+                onChange={(e) => {
+                  setPhoneCountry(e.target.value);
+                  setPhoneCheck(null);
+                  setPhoneError(null);
+                }}
+                className="rounded-md px-2 py-2 text-sm"
+                style={{
+                  background: 'var(--bg-secondary)',
+                  borderColor: 'var(--border-custom)',
+                  color: 'var(--text-primary)',
+                  maxWidth: '8.5rem',
+                }}
+              >
+                {COUNTRY_CODES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.flag} +{c.dial}
+                  </option>
+                ))}
+              </select>
+              <div className="relative flex-1">
+                <Input
+                  type="tel"
+                  inputMode="numeric"
+                  value={phoneNumber}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, '').slice(0, 15);
+                    setPhoneNumber(digits);
+                    setPhoneCheck(null);
+                    setPhoneError(null);
+                  }}
+                  onBlur={() => {
+                    const e164 = toE164(getCountry(phoneCountry).dial, phoneNumber);
+                    if (isValidE164(e164)) checkPhone(e164);
+                  }}
+                  placeholder="Número de WhatsApp"
+                  className="pr-9"
+                  style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-custom)', color: 'var(--text-primary)' }}
+                />
+                {phoneChecking && (
+                  <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 animate-spin" style={{ color: 'var(--text-muted)' }} />
+                )}
+              </div>
+            </div>
+
+            {/* Phone feedback */}
+            {phoneError && (
+              <div
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                  color: 'var(--accent-red)',
+                }}
+              >
+                <AlertCircle className="size-3.5 shrink-0" />
+                <span className="flex-1">{phoneError}</span>
+              </div>
+            )}
+            {phoneCheck?.exists === false && isValidE164(toE164(getCountry(phoneCountry).dial, phoneNumber)) && (
+              <div
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+                style={{
+                  background: 'rgba(34, 197, 94, 0.08)',
+                  border: '1px solid rgba(34, 197, 94, 0.2)',
+                  color: 'var(--score-green)',
+                }}
+              >
+                <CheckCircle2 className="size-3.5 shrink-0" />
+                <span className="flex-1">Número disponible. Te quedan <strong>{guestInitialCredits}</strong> créditos.</span>
+              </div>
+            )}
+
+            {/* "More credits" prompt: when the phone exists and has 1 credit left */}
+            {phoneCheck?.exists === true && phoneCheck.credits === 1 && (
+              <div
+                className="rounded-lg p-3 space-y-2"
+                style={{
+                  background: 'rgba(234, 179, 8, 0.08)',
+                  border: '1px solid rgba(234, 179, 8, 0.25)',
+                }}
+              >
+                <p className="text-xs leading-snug" style={{ color: 'var(--accent-yellow)' }}>
+                  <AlertCircle className="size-3.5 inline mr-1" />
+                  Tras crear este evento te quedará <strong>1 crédito</strong> (el último).
+                  ¿Te gustaría obtener más créditos?
+                </p>
+                <a
+                  href={`https://wa.me/${supportWhatsapp}?text=${encodeURIComponent('Hola, me gustaría obtener más créditos para crear eventos en MarcadoresDJ.')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-colors"
+                  style={{ background: '#25D366', color: '#fff' }}
+                >
+                  <MessageCircle className="size-3.5" />
+                  Me gustaría obtener más créditos
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ STEP 2 — SPORT ═══ */}
+        {step === 2 && (
           <div className="space-y-3">
             <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
               Selecciona el deporte
@@ -395,22 +590,22 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
           </div>
         )}
 
-        {/* ═══ STEP 2 & 3 — TEAMS ═══ */}
-        {(step === 2 || step === 3) && selectedSport && (
+        {/* ═══ STEP 3 & 4 — TEAMS ═══ */}
+        {(step === 3 || step === 4) && selectedSport && (
           <TeamPicker
-            label={step === 2 ? 'Equipo Local' : 'Equipo Visitante'}
+            label={step === 3 ? 'Equipo Local' : 'Equipo Visitante'}
             sport={selectedSport}
-            selection={step === 2 ? teamA : teamB}
-            excludedTeamId={step === 3 && teamA?.mode === 'existing' ? teamA.team.id : null}
+            selection={step === 3 ? teamA : teamB}
+            excludedTeamId={step === 4 && teamA?.mode === 'existing' ? teamA.team.id : null}
             excludedTeamName={
-              (step === 3 && teamA?.mode === 'new' ? teamA.name.trim() : '') || null
+              (step === 4 && teamA?.mode === 'new' ? teamA.name.trim() : '') || null
             }
-            onSelect={(sel) => (step === 2 ? setTeamA(sel) : setTeamB(sel))}
+            onSelect={(sel) => (step === 3 ? setTeamA(sel) : setTeamB(sel))}
           />
         )}
 
-        {/* ═══ STEP 4 — DETAILS ═══ */}
-        {step === 4 && (
+        {/* ═══ STEP 5 — DETAILS ═══ */}
+        {step === 5 && (
           <div className="space-y-3">
             <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
               Detalles del evento
@@ -470,8 +665,8 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
           </div>
         )}
 
-        {/* ═══ STEP 5 — DONE / CREDENTIALS ═══ */}
-        {step === 5 && result && (
+        {/* ═══ STEP 6 — DONE / CREDENTIALS ═══ */}
+        {step === 6 && result && (
           <div className="space-y-4">
             <div className="flex flex-col items-center text-center py-2">
               <div className="size-12 rounded-full flex items-center justify-center mb-2" style={{ background: 'rgba(34, 197, 94, 0.12)' }}>
@@ -502,11 +697,38 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
                 acciones, equipos). También las guardamos en este navegador.
               </p>
             </div>
+
+            {/* Credits info */}
+            {result.lastCredit ? (
+              <div
+                className="rounded-lg p-3 space-y-2"
+                style={{ background: 'rgba(234, 179, 8, 0.08)', border: '1px solid rgba(234, 179, 8, 0.25)' }}
+              >
+                <p className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-yellow)' }}>
+                  <AlertCircle className="size-3.5" />
+                  Te quedan <strong>0 créditos</strong> — este fue el último
+                </p>
+                <a
+                  href={`https://wa.me/${supportWhatsapp}?text=${encodeURIComponent('Hola, me gustaría obtener más créditos para crear eventos en MarcadoresDJ.')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-colors"
+                  style={{ background: '#25D366', color: '#fff' }}
+                >
+                  <MessageCircle className="size-3.5" />
+                  Me gustaría obtener más créditos
+                </a>
+              </div>
+            ) : (
+              <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+                Te quedan <strong style={{ color: 'var(--score-green)' }}>{result.creditsLeft}</strong> crédito(s) para crear más eventos.
+              </p>
+            )}
           </div>
         )}
 
         {/* ═══ FOOTER / NAV ═══ */}
-        {step < 5 && (
+        {step < 6 && (
           <div className="flex items-center justify-between gap-2 pt-2">
             <Button
               variant="ghost"
@@ -519,7 +741,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
               {step === 0 ? 'Cancelar' : 'Atrás'}
             </Button>
 
-            {step < 4 ? (
+            {step < 5 ? (
               <Button
                 size="sm"
                 disabled={!canAdvance}
@@ -551,7 +773,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="flex justify-end pt-2">
             <Button
               size="sm"

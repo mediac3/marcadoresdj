@@ -3,6 +3,7 @@ import { randomUUID, randomInt } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { signToken } from "@/lib/auth";
+import { isValidE164 } from "@/lib/phone";
 
 /**
  * POST /api/public/events/create
@@ -14,7 +15,8 @@ import { signToken } from "@/lib/auth";
  * event; its credentials are returned ONCE (the client stores them in
  * localStorage). Mirrors the validation of POST /api/events.
  *
- * Body (v2 — supports creating NEW teams with players inline):
+ * Body (v3 — WhatsApp phone + credits):
+ *   - phone: string (required, E.164 digits only, e.g. "573226575422")
  *   - termsAccepted: boolean (required if termsEnabled === "true")
  *   - termsVersion: number|string (must match current version when enforced)
  *   - sportId (required)
@@ -27,12 +29,20 @@ import { signToken } from "@/lib/auth";
  *     streamingUrl?, streamingKey?, isPublic (forced true),
  *     tournamentName?, phase?, phaseOrder?, tournamentPhaseId?
  *
- * Response: { success, event, user: {id, username}, password, token, termsVersion }
+ * Phone/credits rules:
+ *   - A phone is unique per visitor. If it already belongs to a guest CREATOR,
+ *     the existing account is reused and one credit is decremented.
+ *   - If the phone is new, a new guest CREATOR is created with
+ *     (guestInitialCredits - 1) credits.
+ *   - If credits <= 0, creation is rejected with 403.
+ *
+ * Response: { success, event, user: {id, username}, password, token, termsVersion, credits, lastCredit }
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
+      phone,
       termsAccepted,
       termsVersion,
       sportId,
@@ -60,6 +70,7 @@ export async function POST(request: Request) {
     const settingsMap = new Map(settings.map((s) => [s.key, s.value]));
     const termsEnabled = settingsMap.get("termsEnabled") === "true";
     const currentTermsVersion = parseInt(settingsMap.get("termsVersion") ?? "0", 10) || 0;
+    const guestInitialCredits = parseInt(settingsMap.get("guestInitialCredits") ?? "5", 10) || 5;
 
     if (termsEnabled) {
       if (!termsAccepted) {
@@ -77,6 +88,15 @@ export async function POST(request: Request) {
       }
     }
 
+    /* ── 1b. Phone validation (required) ── */
+    const normalizedPhone = typeof phone === "string" ? phone.trim() : "";
+    if (!normalizedPhone || !isValidE164(normalizedPhone)) {
+      return NextResponse.json(
+        { error: "Debes ingresar un número de WhatsApp válido" },
+        { status: 400 },
+      );
+    }
+
     /* ── 2. Sport validation ── */
     if (!sportId) {
       return NextResponse.json(
@@ -89,23 +109,67 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Sport not found" }, { status: 404 });
     }
 
-    /* ── 3. Create guest CREATOR user FIRST ──
-       Created early so it can be used as the owner of any new teams the
-       visitor defines inline (POST /api/teams requires auth, which the
-       visitor does not have yet; doing it here bypasses that limitation). */
-    const guestUsername = `invitado-${randomUUID().slice(0, 8)}`;
-    const plainPassword = generatePassword(12);
-    const hashedPassword = await bcrypt.hash(plainPassword, 10);
-
-    const guestUser = await db.user.create({
-      data: {
-        username: guestUsername,
-        password: hashedPassword,
-        role: "CREATOR",
-        name: "Visitante",
-        isActive: true,
-      },
+    /* ── 3. Resolve guest user by phone (reuse) or create new (with credits) ──
+       A phone is unique per visitor. If it exists, reuse that account and
+       decrement one credit. If new, create a guest CREATOR with
+       (guestInitialCredits - 1) credits. This account owns any new teams. */
+    const existingUser = await db.user.findUnique({
+      where: { phone: normalizedPhone },
     });
+
+    let guestUserId: string;
+    let guestUsername: string;
+    let plainPassword: string;
+    let remainingCredits: number;
+    let lastCredit: boolean;
+
+    if (existingUser) {
+      // Reuse the existing guest account.
+      if (existingUser.credits <= 0) {
+        return NextResponse.json(
+          { error: "No tienes créditos disponibles para crear más eventos. Solicita más créditos por WhatsApp." },
+          { status: 403 },
+        );
+      }
+      remainingCredits = existingUser.credits - 1;
+      lastCredit = remainingCredits === 0;
+      await db.user.update({
+        where: { id: existingUser.id },
+        data: { credits: remainingCredits },
+      });
+      guestUserId = existingUser.id;
+      guestUsername = existingUser.username;
+      // No new password for a reused account; issue a fresh one so the visitor
+      // can always access the event they just created.
+      plainPassword = generatePassword(12);
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+      await db.user.update({
+        where: { id: existingUser.id },
+        data: { password: hashedPassword },
+      });
+    } else {
+      // New guest CREATOR account.
+      guestUsername = `invitado-${randomUUID().slice(0, 8)}`;
+      plainPassword = generatePassword(12);
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+      remainingCredits = Math.max(0, guestInitialCredits - 1);
+      lastCredit = remainingCredits === 0;
+      const created = await db.user.create({
+        data: {
+          username: guestUsername,
+          password: hashedPassword,
+          role: "CREATOR",
+          name: "Visitante",
+          isActive: true,
+          phone: normalizedPhone,
+          credits: remainingCredits,
+        },
+      });
+      guestUserId = created.id;
+    }
+
+    /* guestUser is referenced below for the token; keep a minimal object. */
+    const guestUser = { id: guestUserId, username: guestUsername, role: "CREATOR" as const };
 
     /* ── 4. Resolve Team A (existing id OR create new with players) ── */
     let resolvedTeamAId: string;
@@ -281,6 +345,8 @@ export async function POST(request: Request) {
         password: plainPassword,
         token,
         termsVersion: currentTermsVersion,
+        credits: remainingCredits,
+        lastCredit,
       },
       { status: 201 },
     );

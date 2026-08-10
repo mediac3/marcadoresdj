@@ -14,6 +14,9 @@ model User {
   role      String   @default("INITIATOR") // ADMIN, CREATOR, INITIATOR
   name      String?
   isActive  Boolean  @default(true)
+  // WhatsApp + credits for public wizard visitors (guest CREATOR accounts)
+  phone     String?  @unique // E.164, e.g. "573226575422"
+  credits   Int      @default(0) // remaining event-creation credits
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

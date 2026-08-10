@@ -360,7 +360,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
-        className="max-w-lg max-h-[90vh] overflow-y-auto"
+        className="w-[calc(100vw-1.5rem)] max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6"
         style={{ background: 'var(--bg-card)', borderColor: 'var(--border-custom)' }}
       >
         <DialogHeader>
@@ -369,7 +369,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
               {result ? 'Evento creado' : 'Crear evento público'}
             </span>
           </DialogTitle>
-          {step !== 5 && (
+          {step !== 6 && (
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               Paso {step === 0 ? 0 : step} · {stepLabel}
             </p>
@@ -448,7 +448,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
             </p>
 
             {/* Country + phone row */}
-            <div className="flex items-stretch gap-2">
+            <div className="flex items-stretch gap-2 min-w-0">
               <select
                 value={phoneCountry}
                 onChange={(e) => {
@@ -729,7 +729,7 @@ export function PublicEventWizard({ open, onClose, onAuthed }: PublicEventWizard
 
         {/* ═══ FOOTER / NAV ═══ */}
         {step < 6 && (
-          <div className="flex items-center justify-between gap-2 pt-2">
+          <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
             <Button
               variant="ghost"
               size="sm"
@@ -1039,29 +1039,45 @@ function TeamPicker({
           {showPlayers && (
             <div className="space-y-2">
               {players.map((p, idx) => (
-                <div key={idx} className="flex items-center gap-1.5">
-                  <Input
-                    type="number"
-                    min={0}
-                    value={p.number}
-                    onChange={(e) => updatePlayer(idx, { number: e.target.value })}
-                    onBlur={commitNew}
-                    placeholder="#"
-                    className="w-14 text-center"
-                    style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-custom)', color: 'var(--text-primary)' }}
-                  />
-                  <select
-                    value={p.position}
-                    onChange={(e) => updatePlayer(idx, { position: e.target.value })}
-                    onBlur={commitNew}
-                    className="flex-1 h-9 rounded-md px-2 text-xs"
-                    style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-custom)', color: 'var(--text-primary)' }}
-                  >
-                    <option value="">Posición...</option>
-                    {positions.map((pos) => (
-                      <option key={pos} value={pos}>{pos}</option>
-                    ))}
-                  </select>
+                <div key={idx} className="rounded-md p-2 space-y-1.5" style={{ background: 'var(--bg-secondary)' }}>
+                  {/* Row 1: number + position */}
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={p.number}
+                      onChange={(e) => updatePlayer(idx, { number: e.target.value })}
+                      onBlur={commitNew}
+                      placeholder="#"
+                      className="w-14 text-center shrink-0"
+                      style={{ background: 'var(--bg-card)', borderColor: 'var(--border-custom)', color: 'var(--text-primary)' }}
+                    />
+                    <select
+                      value={p.position}
+                      onChange={(e) => updatePlayer(idx, { position: e.target.value })}
+                      onBlur={commitNew}
+                      className="flex-1 min-w-0 h-9 rounded-md px-2 text-xs"
+                      style={{ background: 'var(--bg-card)', borderColor: 'var(--border-custom)', color: 'var(--text-primary)' }}
+                    >
+                      <option value="">Posición...</option>
+                      {positions.map((pos) => (
+                        <option key={pos} value={pos}>{pos}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlayers((prev) => prev.filter((_, i) => i !== idx));
+                        setTimeout(commitNew, 0);
+                      }}
+                      className="shrink-0 size-8 flex items-center justify-center rounded-md"
+                      style={{ color: 'var(--text-muted)' }}
+                      aria-label="Quitar jugador"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                  {/* Row 2: name (full width) */}
                   <Input
                     value={p.name}
                     onChange={(e) => updatePlayer(idx, { name: e.target.value })}
@@ -1072,22 +1088,10 @@ function TeamPicker({
                         addPlayerRow();
                       }
                     }}
-                    placeholder="Nombre"
-                    className="flex-1"
-                    style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-custom)', color: 'var(--text-primary)' }}
+                    placeholder="Nombre del jugador"
+                    className="w-full"
+                    style={{ background: 'var(--bg-card)', borderColor: 'var(--border-custom)', color: 'var(--text-primary)' }}
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPlayers((prev) => prev.filter((_, i) => i !== idx));
-                      setTimeout(commitNew, 0);
-                    }}
-                    className="shrink-0 size-8 flex items-center justify-center rounded-md"
-                    style={{ color: 'var(--text-muted)' }}
-                    aria-label="Quitar jugador"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
                 </div>
               ))}
               <Button

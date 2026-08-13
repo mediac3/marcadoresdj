@@ -178,3 +178,106 @@ export async function requireEventCreatorOrAdmin(
 
   return result;
 }
+
+/**
+ * Read a role's effective permission for a section.
+ * ADMIN always has full access. Other roles read from RoleSectionPermission;
+ * if no row exists, all flags default to false.
+ */
+export async function getSectionPermission(role: string, section: string): Promise<{
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+}> {
+  if (role === "ADMIN") {
+    return { canView: true, canCreate: true, canEdit: true, canDelete: true };
+  }
+  const row = await db.roleSectionPermission.findUnique({
+    where: { role_section: { role, section } },
+  });
+  return {
+    canView: row?.canView ?? false,
+    canCreate: row?.canCreate ?? false,
+    canEdit: row?.canEdit ?? false,
+    canDelete: row?.canDelete ?? false,
+  };
+}
+
+/**
+ * Require team access for a given action.
+ *
+ * - ADMIN: full access (always allowed).
+ * - CREATOR: must have the corresponding flag (canView / canCreate / canEdit /
+ *   canDelete) on the "teams" section. For edit/delete, must ALSO be the owner
+ *   (createdById) of the team — unless no teamId is passed (list/create don't
+ *   need ownership).
+ * - INITIATOR: only canView is honored (no create/edit/delete).
+ *
+ * `action`: "view" | "create" | "edit" | "delete"
+ * `team`: the team record (with createdById) — required for edit/delete.
+ *
+ * Returns { payload } on success, or { error } on denial.
+ */
+export async function requireTeamAccess(
+  request: Request,
+  action: "view" | "create" | "edit" | "delete",
+  team?: { createdById: string | null } | null,
+): Promise<AuthResult> {
+  const result = await requireAuth(request);
+  if (result.error) return result;
+  if (!result.payload) {
+    return {
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      payload: null,
+    };
+  }
+
+  const role = result.payload.role;
+  const userId = result.payload.userId;
+
+  // ADMIN always has full access
+  if (role === "ADMIN") return result;
+
+  const perm = await getSectionPermission(role, "teams");
+  const flag =
+    action === "view" ? perm.canView
+    : action === "create" ? perm.canCreate
+    : action === "edit" ? perm.canEdit
+    : perm.canDelete;
+
+  if (!flag) {
+    return {
+      error: NextResponse.json(
+        { error: `No tienes permiso para ${actionLabel(action)} equipos` },
+        { status: 403 },
+      ),
+      payload: null,
+    };
+  }
+
+  // For edit/delete, CREATOR must also own the team.
+  if ((action === "edit" || action === "delete") && team) {
+    if (team.createdById !== userId) {
+      return {
+        error: NextResponse.json(
+          { error: "Solo puedes gestionar los equipos que creaste" },
+          { status: 403 },
+        ),
+        payload: null,
+      };
+    }
+  }
+
+  return result;
+}
+
+function actionLabel(action: string): string {
+  switch (action) {
+    case "view": return "ver";
+    case "create": return "crear";
+    case "edit": return "editar";
+    case "delete": return "eliminar";
+    default: return "gestionar";
+  }
+}

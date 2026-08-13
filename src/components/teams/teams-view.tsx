@@ -209,10 +209,11 @@ function EmptyState({ hasFilter }: { hasFilter: boolean }) {
 
 export function TeamsView() {
   const navigate = useAppStore((s) => s.navigate);
-  const isCreatorOrAdmin = useAppStore((s) => s.isCreatorOrAdmin);
+  const user = useAppStore((s) => s.user);
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
+  const [canCreateTeam, setCanCreateTeam] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -228,8 +229,21 @@ export function TeamsView() {
     setLoading(true);
     setError('');
     try {
-      const res = await apiGet<{ success: boolean; teams: Team[] }>('/api/teams');
+      const res = await apiGet<{ success: boolean; teams: Team[]; currentUserId?: string; currentUserRole?: string }>('/api/teams');
       setTeams(res.teams);
+      // Determine create permission: ADMIN always; CREATOR/INITIATOR via section permission.
+      if (res.currentUserRole === 'ADMIN') {
+        setCanCreateTeam(true);
+      } else {
+        // Fetch section permissions for the teams section
+        try {
+          const permRes = await apiGet<{ success: boolean; permissions: Array<{ section: string; canCreate: boolean }> }>('/api/my-permissions');
+          const teamPerm = permRes.permissions?.find((p) => p.section === 'teams');
+          setCanCreateTeam(!!teamPerm?.canCreate);
+        } catch {
+          setCanCreateTeam(false);
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al cargar los equipos';
       setError(message);
@@ -310,7 +324,7 @@ export function TeamsView() {
             Gestiona los equipos y sus jugadores
           </p>
         </div>
-        {isCreatorOrAdmin() && (
+        {canCreateTeam && (
           <div className="flex items-center gap-2">
             <Button
               onClick={() => setImportOpen(true)}

@@ -406,13 +406,13 @@ function EditTeamModal({
 export function TeamDetailView() {
   const currentView = useAppStore((s) => s.currentView);
   const navigate = useAppStore((s) => s.navigate);
-  const isCreatorOrAdmin = useAppStore((s) => s.isCreatorOrAdmin);
 
   const teamId = currentView.page === 'TEAM_DETAIL' ? currentView.teamId : '';
 
   const [team, setTeam] = useState<Team | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [canEditTeam, setCanEditTeam] = useState(false);
 
   // Modal states
   const [editTeamOpen, setEditTeamOpen] = useState(false);
@@ -424,15 +424,21 @@ export function TeamDetailView() {
 
   const { toast } = useToast();
 
-  const canEdit = isCreatorOrAdmin();
-
   const fetchTeam = useCallback(async () => {
     if (!teamId) return;
     setLoading(true);
     setError('');
     try {
-      const res = await apiGet<{ success: boolean; team: Team }>(`/api/teams/${teamId}`);
+      const res = await apiGet<{ success: boolean; team: Team; currentUserId?: string; currentUserRole?: string }>(`/api/teams/${teamId}`);
       setTeam(res.team);
+      // canEdit: ADMIN always; CREATOR only if they own the team (createdById).
+      if (res.currentUserRole === 'ADMIN') {
+        setCanEditTeam(true);
+      } else if (res.currentUserRole === 'CREATOR') {
+        setCanEditTeam(res.team.createdById === res.currentUserId);
+      } else {
+        setCanEditTeam(false);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al cargar el equipo';
       setError(message);
@@ -558,7 +564,7 @@ export function TeamDetailView() {
           </div>
         </div>
 
-        {canEdit && (
+        {canEditTeam && (
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -604,11 +610,11 @@ export function TeamDetailView() {
             No hay jugadores en este equipo
           </p>
           <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-            {canEdit
+            {canEditTeam
               ? 'Agrega jugadores al equipo para comenzar.'
               : 'Aún no se han registrado jugadores.'}
           </p>
-          {canEdit && (
+          {canEditTeam && (
             <Button
               className="mt-4 h-9 text-sm"
               onClick={() => setAddPlayerOpen(true)}
@@ -627,7 +633,7 @@ export function TeamDetailView() {
               <PlayerCardMobile
                 key={player.id}
                 player={player}
-                canEdit={canEdit}
+                canEdit={canEditTeam}
                 onEdit={() => setEditPlayer(player)}
                 onDelete={() => setDeleteTarget(player)}
               />
@@ -644,7 +650,7 @@ export function TeamDetailView() {
                   <TableHead style={{ color: 'var(--text-muted)' }}>Nombre</TableHead>
                   <TableHead style={{ color: 'var(--text-muted)', width: '150px' }}>Posición</TableHead>
                   <TableHead style={{ color: 'var(--text-muted)', width: '100px' }}>Apodo</TableHead>
-                  {canEdit && (
+                  {canEditTeam && (
                     <TableHead style={{ color: 'var(--text-muted)', width: '100px' }} className="text-right">
                       Acciones
                     </TableHead>
@@ -687,7 +693,7 @@ export function TeamDetailView() {
                         {player.nickname || '—'}
                       </span>
                     </TableCell>
-                    {canEdit && (
+                    {canEditTeam && (
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button

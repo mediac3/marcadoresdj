@@ -50,6 +50,7 @@ interface Team {
   sportId: string;
   gender: string;
   ageCategory: string;
+  createdById: string | null;
   sport?: Sport;
   players?: Player[];
   _count?: { players: number };

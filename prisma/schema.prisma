@@ -27,6 +27,7 @@ model User {
   comments          Comment[]
   eventAccessEntries EventAccess[]  @relation("UserEventAccess")
   tournamentsCreated  Tournament[]  @relation("TournamentCreator")
+  teamsCreated        Team[]        @relation("TeamCreator")
   termsAcceptances    EventTermsAcceptance[] @relation("TermsAcceptanceGuest")
 }
 
@@ -68,6 +69,8 @@ model Team {
   sport        Sport     @relation(fields: [sportId], references: [id])
   gender       String    @default("Mixto")      // Masculino, Femenino, Mixto
   ageCategory  String    @default("Libre")      // Juvenil, Junior, Sub-15, Sub-17, Sub-20, Senior, Libre
+  createdById  String?                          // owner (null = legacy/orphan, only admin manages)
+  createdBy    User?     @relation("TeamCreator", fields: [createdById], references: [id], onDelete: SetNull)
   players      Player[]
   eventsA      Event[]   @relation("TeamA")
   eventsB      Event[]   @relation("TeamB")

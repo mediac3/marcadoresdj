@@ -1,23 +1,22 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { verifyToken, extractBearerToken } from "@/lib/auth";
+import { requireTeamAccess } from "@/lib/event-auth";
 
+/**
+ * GET /api/teams
+ *
+ * Returns teams visible to the authenticated user.
+ * - ADMIN: all teams.
+ * - CREATOR / INITIATOR: requires teams.canView. Returns all teams (so they
+ *   can be picked when creating events); the client hides edit/delete buttons
+ *   for teams the user does not own via createdById.
+ */
 export async function GET(request: Request) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Authorization token is required" },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
+    const { error, payload } = await requireTeamAccess(request, "view");
+    if (error) return error;
     if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -43,7 +42,14 @@ export async function GET(request: Request) {
       orderBy: { name: "asc" },
     });
 
-    return NextResponse.json({ success: true, teams });
+    // Expose createdById + the current userId so the client can gate
+    // edit/delete buttons by ownership.
+    return NextResponse.json({
+      success: true,
+      teams,
+      currentUserId: payload.userId,
+      currentUserRole: payload.role,
+    });
   } catch {
     return NextResponse.json(
       { error: "Internal server error" },
@@ -52,29 +58,18 @@ export async function GET(request: Request) {
   }
 }
 
+/**
+ * POST /api/teams
+ *
+ * Create a team. Requires teams.canCreate (ADMIN always allowed). The new
+ * team is assigned to the authenticated user (createdById).
+ */
 export async function POST(request: Request) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Authorization token is required" },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
+    const { error, payload } = await requireTeamAccess(request, "create");
+    if (error) return error;
     if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
-    }
-
-    if (payload.role !== "ADMIN" && payload.role !== "CREATOR") {
-      return NextResponse.json(
-        { error: "Creator or Admin access required" },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
@@ -103,6 +98,7 @@ export async function POST(request: Request) {
         sportId,
         gender: gender || "Mixto",
         ageCategory: ageCategory || "Libre",
+        createdById: payload.userId,
       },
       include: {
         sport: {

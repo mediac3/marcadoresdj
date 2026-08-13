@@ -1,26 +1,21 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { verifyToken, extractBearerToken } from "@/lib/auth";
+import { requireTeamAccess } from "@/lib/event-auth";
 
+/**
+ * GET /api/teams/[id]
+ *
+ * View a team detail. Requires teams.canView (ADMIN always allowed).
+ */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Authorization token is required" },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
+    const { error, payload } = await requireTeamAccess(request, "view");
+    if (error) return error;
     if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id } = await params;
@@ -44,7 +39,12 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ success: true, team });
+    return NextResponse.json({
+      success: true,
+      team,
+      currentUserId: payload.userId,
+      currentUserRole: payload.role,
+    });
   } catch {
     return NextResponse.json(
       { error: "Internal server error" },
@@ -53,34 +53,17 @@ export async function GET(
   }
 }
 
+/**
+ * PUT /api/teams/[id]
+ *
+ * Edit a team. Requires teams.canEdit AND ownership (createdById) for
+ * non-admin users.
+ */
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Authorization token is required" },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
-    }
-
-    if (payload.role !== "ADMIN" && payload.role !== "CREATOR") {
-      return NextResponse.json(
-        { error: "Creator or Admin access required" },
-        { status: 403 }
-      );
-    }
-
     const { id } = await params;
 
     const existing = await db.team.findUnique({ where: { id } });
@@ -90,6 +73,9 @@ export async function PUT(
         { status: 404 }
       );
     }
+
+    const { error } = await requireTeamAccess(request, "edit", existing);
+    if (error) return error;
 
     const body = await request.json();
     const { name, shortName, logo, sportId, gender, ageCategory } = body;
@@ -133,34 +119,17 @@ export async function PUT(
   }
 }
 
+/**
+ * DELETE /api/teams/[id]
+ *
+ * Delete a team. Requires teams.canDelete AND ownership (createdById) for
+ * non-admin users.
+ */
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Authorization token is required" },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
-    }
-
-    if (payload.role !== "ADMIN") {
-      return NextResponse.json(
-        { error: "Admin access required" },
-        { status: 403 }
-      );
-    }
-
     const { id } = await params;
 
     const existing = await db.team.findUnique({ where: { id } });
@@ -170,6 +139,9 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    const { error } = await requireTeamAccess(request, "delete", existing);
+    if (error) return error;
 
     await db.team.delete({ where: { id } });
 

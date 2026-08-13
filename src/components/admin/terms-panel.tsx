@@ -65,6 +65,27 @@ function toBoolString(value: boolean): string {
   return value ? 'true' : 'false';
 }
 
+/* ── Type aliases (named so fetch callbacks don't depend on state via typeof) ── */
+type AcceptanceRow = {
+  id: string;
+  termsVersion: number;
+  acceptedAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  event: { id: string; name: string | null; sport: { name: string; icon: string } | null; teamA: { name: string } | null; teamB: { name: string } | null } | null;
+  guestUser: { id: string; username: string } | null;
+};
+
+type VisitorRow = {
+  id: string;
+  username: string;
+  phone: string | null;
+  phoneDisplay: string;
+  credits: number;
+  eventsCreated: number;
+  createdAt: string;
+};
+
 export function TermsPanel() {
   const { toast } = useToast();
 
@@ -84,27 +105,11 @@ export function TermsPanel() {
   const [initialSupportWhatsapp, setInitialSupportWhatsapp] = useState('573226575422');
 
   /* ── Acceptance audit history ── */
-  const [acceptances, setAcceptances] = useState<Array<{
-    id: string;
-    termsVersion: number;
-    acceptedAt: string;
-    ipAddress: string | null;
-    userAgent: string | null;
-    event: { id: string; name: string | null; sport: { name: string; icon: string } | null; teamA: { name: string } | null; teamB: { name: string } | null } | null;
-    guestUser: { id: string; username: string } | null;
-  }>>([]);
+  const [acceptances, setAcceptances] = useState<AcceptanceRow[]>([]);
   const [acceptancesLoading, setAcceptancesLoading] = useState(false);
 
   /* ── Visitors (guest creators with phone + credits + event count) ── */
-  const [visitors, setVisitors] = useState<Array<{
-    id: string;
-    username: string;
-    phone: string | null;
-    phoneDisplay: string;
-    credits: number;
-    eventsCreated: number;
-    createdAt: string;
-  }>>([]);
+  const [visitors, setVisitors] = useState<VisitorRow[]>([]);
   const [visitorsLoading, setVisitorsLoading] = useState(false);
 
   // El botón Guardar se habilita cuando hay cambios reales respecto a lo cargado.
@@ -155,7 +160,7 @@ export function TermsPanel() {
   const fetchAcceptances = useCallback(async () => {
     setAcceptancesLoading(true);
     try {
-      const res = await apiGet<{ success: boolean; acceptances: typeof acceptances }>(
+      const res = await apiGet<{ success: boolean; acceptances: AcceptanceRow[] }>(
         '/api/admin/terms/acceptances',
       );
       setAcceptances(res.acceptances ?? []);
@@ -164,13 +169,14 @@ export function TermsPanel() {
     } finally {
       setAcceptancesLoading(false);
     }
-  }, [acceptances]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── Load visitors (guest creators with phone) ── */
   const fetchVisitors = useCallback(async () => {
     setVisitorsLoading(true);
     try {
-      const res = await apiGet<{ success: boolean; visitors: typeof visitors }>(
+      const res = await apiGet<{ success: boolean; visitors: VisitorRow[] }>(
         '/api/admin/visitors',
       );
       setVisitors(res.visitors ?? []);
@@ -179,7 +185,8 @@ export function TermsPanel() {
     } finally {
       setVisitorsLoading(false);
     }
-  }, [visitors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     fetchTerms();

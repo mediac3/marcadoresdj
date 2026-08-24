@@ -1798,7 +1798,7 @@ export function PublicView() {
 
   /* ── Ads, fingerprint, site settings ── */
   const fingerprint = useVisitorFingerprint();
-  const [siteSettings, setSiteSettings] = useState({ visitCounterEnabled: false, realtimeCounterEnabled: false });
+  const [siteSettings, setSiteSettings] = useState({ visitCounterEnabled: false, realtimeCounterEnabled: false, publicEventCreation: true });
   const realtimeCount = useRealtimeCounter(siteSettings.realtimeCounterEnabled);
   const [totalVisits, setTotalVisits] = useState(0);
 
@@ -1824,6 +1824,8 @@ export function PublicView() {
         setSiteSettings({
           visitCounterEnabled: data.visitCounterEnabled === 'true',
           realtimeCounterEnabled: data.realtimeCounterEnabled === 'true',
+          // Activado por defecto; solo se oculta si el admin lo desactiva explícitamente.
+          publicEventCreation: data.publicEventCreationEnabled !== 'false',
         });
       })
       .catch(() => {});
@@ -2309,20 +2311,22 @@ export function PublicView() {
               </Button>
             ))}
             <Separator orientation="vertical" className="h-5 mx-1" />
-            <button
-              type="button"
-              onClick={() => setShowCreateWizard(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold min-h-[44px] transition-colors"
-              style={{
-                background: 'var(--accent)',
-                color: '#fff',
-              }}
-              title="Crea un evento público"
-            >
-              <Plus className="size-3.5" />
-              <span className="hidden sm:inline">Crear evento</span>
-              <span className="sm:hidden">Crear</span>
-            </button>
+            {siteSettings.publicEventCreation && (
+              <button
+                type="button"
+                onClick={() => setShowCreateWizard(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold min-h-[44px] transition-colors"
+                style={{
+                  background: 'var(--accent)',
+                  color: '#fff',
+                }}
+                title="Crea un evento público"
+              >
+                <Plus className="size-3.5" />
+                <span className="hidden sm:inline">Crear evento</span>
+                <span className="sm:hidden">Crear</span>
+              </button>
+            )}
             <a
               href="#login"
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold min-h-[44px]"

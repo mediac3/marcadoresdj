@@ -72,6 +72,16 @@ export async function POST(request: Request) {
     const currentTermsVersion = parseInt(settingsMap.get("termsVersion") ?? "0", 10) || 0;
     const guestInitialCredits = parseInt(settingsMap.get("guestInitialCredits") ?? "5", 10) || 5;
 
+    /* ── 0. Public event creation toggle ──
+       El admin puede desactivar el botón «Crear evento» del sitio público;
+       el endpoint también se bloquea para evitar creaciones directas por API. */
+    if (settingsMap.get("publicEventCreationEnabled") === "false") {
+      return NextResponse.json(
+        { error: "La creación de eventos desde el sitio público está desactivada" },
+        { status: 403 },
+      );
+    }
+
     if (termsEnabled) {
       if (!termsAccepted) {
         return NextResponse.json(

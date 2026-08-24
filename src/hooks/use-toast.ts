@@ -9,7 +9,11 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+// Tiempo tras el cierre antes de desmontar el toast del DOM.
+// Antes era 1000000 (~17 min): el toast cerrado seguía montado y el viewport
+// de Radix (pointerEvents activo mientras hay toasts) bloqueaba los clics de
+// la zona durante todo ese tiempo.
+const TOAST_REMOVE_DELAY = 5000
 
 type ToasterToast = ToastProps & {
   id: string

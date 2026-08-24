@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Settings, Eye, EyeOff, BarChart3, Loader2, Globe, Check } from 'lucide-react';
+import { Settings, Eye, EyeOff, BarChart3, Loader2, Globe, Check, CalendarPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -14,12 +14,18 @@ import { useToast } from '@/hooks/use-toast';
 interface SiteSettings {
   visitCounterEnabled: string;
   realtimeCounterEnabled: string;
+  publicEventCreationEnabled?: string;
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 
 function parseBool(value: string | undefined): boolean {
   return value === 'true';
+}
+
+/* Settings que vienen activadas por defecto (undefined = activado). */
+function parseBoolDefaultTrue(value: string | undefined): boolean {
+  return value !== 'false';
 }
 
 function toBoolString(value: boolean): string {
@@ -147,11 +153,14 @@ export function SettingsPanel() {
   /* ── Local working copy ────────────────────────────────────────────────── */
   const [visitCounter, setVisitCounter] = useState(false);
   const [realtimeCounter, setRealtimeCounter] = useState(false);
+  const [publicEventCreation, setPublicEventCreation] = useState(true);
 
   const hasChanges =
     settings !== null &&
     (parseBool(settings.visitCounterEnabled) !== visitCounter ||
-      parseBool(settings.realtimeCounterEnabled) !== realtimeCounter);
+      parseBool(settings.realtimeCounterEnabled) !== realtimeCounter ||
+      parseBoolDefaultTrue(settings.publicEventCreationEnabled) !==
+        publicEventCreation);
 
   /* ── Fetch settings on mount ───────────────────────────────────────────── */
   const fetchSettings = useCallback(async () => {
@@ -162,6 +171,9 @@ export function SettingsPanel() {
       setSettings(res);
       setVisitCounter(parseBool(res.visitCounterEnabled));
       setRealtimeCounter(parseBool(res.realtimeCounterEnabled));
+      setPublicEventCreation(
+        parseBoolDefaultTrue(res.publicEventCreationEnabled),
+      );
     } catch (err) {
       setError(
         err instanceof Error
@@ -185,6 +197,7 @@ export function SettingsPanel() {
       const body: SiteSettings = {
         visitCounterEnabled: toBoolString(visitCounter),
         realtimeCounterEnabled: toBoolString(realtimeCounter),
+        publicEventCreationEnabled: toBoolString(publicEventCreation),
       };
       await apiPut('/api/admin/settings', body);
       setSettings(body);
@@ -209,7 +222,7 @@ export function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [visitCounter, realtimeCounter, toast]);
+  }, [visitCounter, realtimeCounter, publicEventCreation, toast]);
 
   /* ── Loading skeleton ──────────────────────────────────────────────────── */
   if (loading) {
@@ -299,6 +312,15 @@ export function SettingsPanel() {
           checked={realtimeCounter}
           onCheckedChange={setRealtimeCounter}
           preview={<RealtimeCounterPreview />}
+        />
+
+        <SettingCard
+          icon={CalendarPlus}
+          iconColor={publicEventCreation ? 'var(--accent)' : 'var(--text-muted)'}
+          title="Botón Crear Evento (Público)"
+          description="Activa o desactiva el botón «Crear evento» del sitio público. Al desactivarlo, los visitantes no pueden crear eventos desde el frontend."
+          checked={publicEventCreation}
+          onCheckedChange={setPublicEventCreation}
         />
       </div>
 

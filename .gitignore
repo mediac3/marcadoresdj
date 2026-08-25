@@ -26,6 +26,11 @@ next-env.d.ts
 /db/*.db-journal
 /db/*.db-shm
 /db/*.db-wal
+# EXCEPCIÓN: db/custom.db se versiona INTENCIONALMENTE como snapshot de
+# referencia (bootstrap de nuevos despliegues). En producción la BD viva vive
+# fuera del paquete y NUNCA se sobrescribe con este archivo (ver README,
+# sección «Base de datos» y .zscripts/start.sh).
+!db/custom.db
 /prisma/migrations/dev.db*
 
 # ─── Producción ──────────────────────────────────────────────────────────────

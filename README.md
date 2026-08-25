@@ -194,7 +194,7 @@ openssl rand -base64 48
 
 ### Desarrollo (SQLite)
 
-SQLite ya está configurado por defecto. La BD se crea en `db/custom.db` (ignorado por Git).
+SQLite ya está configurado por defecto. La BD se crea en `db/custom.db`. Este archivo se versiona en Git **intencionalmente** como snapshot de referencia que sirve de BD inicial en nuevos despliegues; en producción la BD viva se mantiene aparte y nunca se sobrescribe (ver «Producción: preservación de datos» más abajo).
 
 ```bash
 bun run db:push      # Aplica el schema a la BD
@@ -237,6 +237,45 @@ SEED_ADMIN_PASSWORD="password-seguro-aqui" \
 SEED_ADMIN_NAME="Mi Nombre" \
 bunx prisma db seed
 ```
+
+### Producción: preservación de datos
+
+> **Regla de oro:** los despliegues JAMÁS sobrescriben la BD de producción. El
+> `db/custom.db` del repositorio es solo un snapshot de referencia (bootstrap
+> para instalaciones nuevas); la BD viva de producción vive fuera del paquete
+> desplegable.
+
+**Cómo funciona en cada plataforma:**
+
+| Plataforma | Dónde vive la BD de producción | Por qué los datos están a salvo |
+| ---------- | ------------------------------ | ------------------------------- |
+| **xcloud** (`.zscripts/`) | `/app/data/custom.db` | Está fuera del paquete de despliegue. `start.sh` la adopta solo en el primer arranque; en los siguientes la conserva intacta, hace un backup automático (mantiene los 5 más recientes en `/app/data/backups/`) y sincroniza tablas/columnas nuevas con `prisma db push` (no destructivo). |
+| **Docker / Compose** | Volumen `marcadoresdj_db` (`/app/db`) | `.dockerignore` excluye la BD de la imagen, y el volumen persiste entre reinicios y redeploys (`docker compose up --build` no lo toca). |
+| **BD externa** (PostgreSQL u otra) | La que indique `DATABASE_URL` | El despliegue nunca escribe en ella; solo `prisma db push`/`migrate` aplican cambios de esquema. |
+
+**Migración de una instalación xcloud existente (solo una vez):** los
+despliegues antiguos usaban la BD empaquetada directamente en
+`/app/db/custom.db`. Antes del primer despliegue con la nueva lógica, ejecuta
+en la instancia de producción para que `start.sh` adopte la BD viva actual:
+
+```bash
+mkdir -p /app/data
+cp /app/db/custom.db /app/data/custom.db
+```
+
+**Backups manuales:**
+
+```bash
+# xcloud (en la instancia): la BD viva + los backups automáticos
+cp /app/data/custom.db /tmp/backup-$(date +%Y%m%d).db
+
+# Docker Compose
+docker compose cp marcadoresdj:/app/db/custom.db ./backup-$(date +%Y%m%d).db
+```
+
+**Restaurar** es copiar el backup de vuelta a la ruta correspondiente
+(`/app/data/custom.db` en xcloud; el volumen en Docker) con los servicios
+detenidos, y arrancar de nuevo.
 
 ---
 
@@ -281,7 +320,6 @@ El repositorio incluye los scripts oficiales de despliegue en `.zscripts/` (comp
 Configura en tu panel de xcloud.host:
 
 ```
-DATABASE_URL=file:/app/db/custom.db
 JWT_SECRET=<genera-uno-aleatorio-fuerte>
 NODE_ENV=production
 PORT=3000
@@ -289,7 +327,11 @@ HOSTNAME=0.0.0.0
 NEXT_TELEMETRY_DISABLED=1
 ```
 
-> Si necesitas PostgreSQL, cambia `DATABASE_URL` y el provider en `prisma/schema.prisma` antes del build.
+> **`DATABASE_URL` ya no hace falta configurarla** (legacy: `file:/app/db/custom.db`).
+> `start.sh` gestiona la BD automáticamente en `/app/data/custom.db`, que
+> persiste entre despliegues (ver «Producción: preservación de datos»). Solo
+> define `DATABASE_URL` si usas una BD externa como PostgreSQL; en ese caso
+> cambia también el provider en `prisma/schema.prisma` antes del build.
 
 ---
 

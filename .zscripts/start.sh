@@ -53,30 +53,76 @@ cd "$BUILD_DIR" || exit 1
 
 ls -lah
 
-DEFAULT_PACKAGED_DB_PATH="/app/db/custom.db"
-DEFAULT_PACKAGED_DATABASE_URL="file:$DEFAULT_PACKAGED_DB_PATH"
+# ── Base de datos persistente de producción ──────────────────────────────────
+# El paquete de despliegue incluye db/custom.db (snapshot del repo), pero esa
+# copia SOLO sirve como BD inicial de arranque. La BD viva de producción vive
+# en /app/data/custom.db, FUERA del paquete: un nuevo despliegue nunca la pisa
+# y los datos existentes se conservan.
+PACKAGED_DB_PATH="./db/custom.db"
+PERSIST_DB_DIR="/app/data"
+PERSIST_DB_PATH="$PERSIST_DB_DIR/custom.db"
+PERSIST_BACKUP_DIR="$PERSIST_DB_DIR/backups"
+PERSIST_DATABASE_URL="file:$PERSIST_DB_PATH"
+
+# Solo se considera BD "externa" la que apunta a otro destino (p. ej. PostgreSQL).
+# El valor antiguo file:/app/db/custom.db (BD empaquetada) se redirige a la
+# persistente para que los despliegues no pisen los datos de producción.
+case "${DATABASE_URL:-}" in
+    ""|"file:/app/db/custom.db"|"file:./db/custom.db"|"file:$PACKAGED_DB_PATH")
+        USE_PERSISTENT_DB=1
+        ;;
+    *)
+        USE_PERSISTENT_DB=0
+        ;;
+esac
+
+if [ "$USE_PERSISTENT_DB" = "1" ]; then
+    mkdir -p "$PERSIST_DB_DIR" "$PERSIST_BACKUP_DIR"
+
+    if [ -f "$PERSIST_DB_PATH" ]; then
+        # Copia de seguridad antes de arrancar; se conservan las 5 más recientes
+        BACKUP_FILE="$PERSIST_BACKUP_DIR/custom-$(date +%Y%m%d-%H%M%S).db"
+        cp "$PERSIST_DB_PATH" "$BACKUP_FILE"
+        ls -1t "$PERSIST_BACKUP_DIR"/custom-*.db 2>/dev/null | tail -n +6 | xargs -r rm -f
+        echo "🗄️  BD persistente detectada: $PERSIST_DB_PATH (datos de producción conservados)"
+        echo "🗄️  Backup de arranque: $BACKUP_FILE"
+    elif [ -f "$PACKAGED_DB_PATH" ]; then
+        cp "$PACKAGED_DB_PATH" "$PERSIST_DB_PATH"
+        echo "🗄️  Primer arranque: BD inicial adoptada del paquete ($PACKAGED_DB_PATH)"
+    else
+        echo "❌ No existe $PERSIST_DB_PATH ni $PACKAGED_DB_PATH; no se puede iniciar"
+        exit 1
+    fi
+
+    # Sincroniza tablas/columnas nuevas del esquema SIN borrar datos existentes.
+    # Si falla (p. ej. sin red para descargar el CLI), se continúa con el actual.
+    if [ -f "./prisma/schema.prisma" ]; then
+        echo "🗄️  Sincronizando esquema de Prisma (no destructivo)..."
+        if DATABASE_URL="$PERSIST_DATABASE_URL" bunx prisma@6 db push --skip-generate --schema ./prisma/schema.prisma; then
+            echo "✅ Esquema sincronizado"
+        else
+            echo "⚠️  No se pudo sincronizar el esquema; se continúa con el existente"
+        fi
+    fi
+
+    export DATABASE_URL="$PERSIST_DATABASE_URL"
+fi
 
 # 启动 Next.js 服务器
 if [ -f "./next-service-dist/server.js" ]; then
     echo "🚀 启动 Next.js 服务器..."
     cd next-service-dist/ || exit 1
     
-    # 设置环境变量
+    # Configurar variables de entorno
     export NODE_ENV=production
     export PORT="${PORT:-3000}"
     export HOSTNAME="${HOSTNAME:-0.0.0.0}"
-    export DATABASE_URL="${DATABASE_URL:-$DEFAULT_PACKAGED_DATABASE_URL}"
+    # DATABASE_URL ya está definida: la persistente (arriba) o una externa del entorno
 
-    if [ "$DATABASE_URL" = "$DEFAULT_PACKAGED_DATABASE_URL" ]; then
-        if [ ! -f "$DEFAULT_PACKAGED_DB_PATH" ]; then
-            echo "❌ 未找到打包后的数据库文件 $DEFAULT_PACKAGED_DB_PATH"
-            echo "   为避免生产环境启动到空数据库，启动已终止"
-            exit 1
-        fi
-
-        echo "🗄️  当前使用打包数据库: $DEFAULT_PACKAGED_DB_PATH"
+    if [ "$DATABASE_URL" = "$PERSIST_DATABASE_URL" ]; then
+        echo "🗄️  Usando BD persistente: $PERSIST_DB_PATH"
     else
-        echo "🗄️  当前使用外部指定数据库: $DATABASE_URL"
+        echo "🗄️  Usando BD externa especificada: $DATABASE_URL"
     fi
     
     # 后台启动 Next.js

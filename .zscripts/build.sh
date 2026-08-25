@@ -77,19 +77,31 @@ if [ -d "public" ]; then
     cp -r public "$BUILD_DIR/next-service-dist/"
 fi
 
-# 将测试环境数据库复制到构建产物中，生产环境直接使用这份数据库
+# Copiar la BD del repo al artefacto de build. Su rol es SOLO de BD inicial
+# (bootstrap): start.sh la adopta únicamente en el primer arranque; después la
+# BD viva persiste en /app/data/custom.db y los despliegues NO la sobrescriben.
 if [ -f "./db/custom.db" ]; then
-    echo "🗄️  复制测试环境数据库到构建产物..."
+    echo "🗄️  Copiando BD inicial (bootstrap) al artefacto de build..."
     mkdir -p "$BUILD_DIR/db"
     cp -r ./db/. "$BUILD_DIR/db/"
 
-    echo "🗄️  同步构建产物中的数据库结构..."
+    echo "🗄️  Sincronizando estructura de la BD empaquetada..."
     DATABASE_URL="file:$BUILD_DIR/db/custom.db" bun run db:push
-    echo "✅ 构建产物数据库已准备完成"
+    echo "✅ BD empaquetada lista"
     ls -lah "$BUILD_DIR/db"
 else
-    echo "❌ 未找到测试环境数据库文件 ./db/custom.db，无法继续构建生产包"
+    echo "❌ No se encontró ./db/custom.db; no se puede continuar el build de producción"
     exit 1
+fi
+
+# Empaquetar el schema de Prisma: start.sh lo usa en producción para aplicar
+# tablas/columnas nuevas sobre la BD persistente SIN borrar datos existentes.
+if [ -f "./prisma/schema.prisma" ]; then
+    echo "  - Copiando prisma/schema.prisma"
+    mkdir -p "$BUILD_DIR/prisma"
+    cp ./prisma/schema.prisma "$BUILD_DIR/prisma/"
+else
+    echo "⚠️  Falta prisma/schema.prisma: start.sh no podrá sincronizar el esquema en producción"
 fi
 
 # 复制 Caddyfile（如果存在）

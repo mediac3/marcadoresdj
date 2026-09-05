@@ -315,6 +315,23 @@ El repositorio incluye los scripts oficiales de despliegue en `.zscripts/` (comp
 3. Despliega el tar.gz según el proceso de tu plataforma.
 4. El `start.sh` es el entrypoint: arranca Next.js + Caddy (puerto 81 por defecto, ver `Caddyfile`).
 
+> **Pagos de tarjetas (una sola vez tras el primer despliegue con la
+> funcionalidad):** `start.sh` crea las tablas nuevas automáticamente
+> (`prisma db push` no destructivo), pero las tarifas de tarjetas de la BD de
+> producción quedan apagadas. Tras el despliegue, ejecuta en la instancia:
+>
+> ```bash
+> cd /home/z/my-project && git pull
+> DATABASE_URL="file:/app/data/custom.db" node scripts/backfill-card-payments.mjs
+> ```
+>
+> Marca las tarjetas conocidas (Amarilla/Azul/Roja) con sus valores por
+> defecto, crea los pagos PENDIENTE de tarjetas históricas y corrige marcadores
+> antiguos donde las tarjetas habían sumado puntos. Idempotente: puede
+> ejecutarse varias veces sin duplicar. Alternativa sin script: activa las
+> tarjetas por deporte en **Acciones y Pagos → Tarifas**; los pagos pendientes
+> de tarjetas pasadas se crean solos al abrir la sección.
+
 ### Variables de entorno en producción
 
 Configura en tu panel de xcloud.host:

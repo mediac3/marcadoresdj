@@ -1,12 +1,16 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCreatorOrAdmin } from '@/lib/event-auth';
+import { requireTeamAccess } from '@/lib/event-auth';
 
 export async function POST(request: Request) {
   try {
     /* ── Auth ────────────────────────────────────────────────────────────── */
-    const { error, payload } = await requireCreatorOrAdmin(request);
+    // Importing teams requires the teams.canCreate flag (ADMIN always allowed).
+    const { error, payload } = await requireTeamAccess(request, 'create');
     if (error) return error;
+    if (!payload) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     /* ── Parse body ──────────────────────────────────────────────────────── */
     const body = await request.json();
@@ -139,7 +143,7 @@ export async function POST(request: Request) {
     const created = await db.$transaction(
       payloads.map((p) =>
         db.team.create({
-          data: p,
+          data: { ...p, createdById: payload.userId },
           include: { sport: { select: { id: true, name: true, icon: true } }, _count: { select: { players: true } } },
         }),
       ),

@@ -61,7 +61,9 @@ export function PlayerModal({ teamId, sportName, player, isOpen, onClose, onSave
     if (sportName && POSITIONS_BY_SPORT[sportName]) {
       return POSITIONS_BY_SPORT[sportName];
     }
-    return Object.values(POSITIONS_BY_SPORT).flat();
+    // Dedupe: e.g. "Portero" exists in both Fútbol and Microfútbol, and
+    // duplicate keys crash the datalist render in dev (React same-key error).
+    return [...new Set(Object.values(POSITIONS_BY_SPORT).flat())];
   }, [sportName]);
 
   // Pre-fill form when editing

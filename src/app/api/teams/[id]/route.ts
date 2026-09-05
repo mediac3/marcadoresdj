@@ -56,8 +56,9 @@ export async function GET(
 /**
  * PUT /api/teams/[id]
  *
- * Edit a team. Requires teams.canEdit AND ownership (createdById) for
- * non-admin users.
+ * Edit a team. Requires teams.canEdit for non-admin users, plus the team being
+ * assigned to them. Only ADMIN can change the team assignment (createdById):
+ * body field `createdById` accepts a user id or null (unassign).
  */
 export async function PUT(
   request: Request,
@@ -74,11 +75,40 @@ export async function PUT(
       );
     }
 
-    const { error } = await requireTeamAccess(request, "edit", existing);
+    const { error, payload } = await requireTeamAccess(request, "edit", existing);
     if (error) return error;
+    if (!payload) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const body = await request.json();
-    const { name, shortName, logo, sportId, gender, ageCategory } = body;
+    const { name, shortName, logo, sportId, gender, ageCategory, createdById } = body;
+
+    // Assignment change (createdById) is reserved for ADMIN.
+    let assignedCreatedById: string | null | undefined;
+    if (createdById !== undefined) {
+      if (payload.role !== "ADMIN") {
+        return NextResponse.json(
+          { error: "Solo un administrador puede reasignar el creador del equipo" },
+          { status: 403 }
+        );
+      }
+      if (createdById === null || createdById === "") {
+        assignedCreatedById = null;
+      } else {
+        const targetUser = await db.user.findUnique({
+          where: { id: createdById },
+          select: { id: true, isActive: true },
+        });
+        if (!targetUser || !targetUser.isActive) {
+          return NextResponse.json(
+            { error: "Usuario asignado no encontrado o inactivo" },
+            { status: 400 }
+          );
+        }
+        assignedCreatedById = targetUser.id;
+      }
+    }
 
     if (sportId) {
       const sport = await db.sport.findUnique({ where: { id: sportId } });
@@ -99,6 +129,7 @@ export async function PUT(
         ...(sportId && { sportId }),
         ...(gender !== undefined && { gender }),
         ...(ageCategory !== undefined && { ageCategory }),
+        ...(assignedCreatedById !== undefined && { createdById: assignedCreatedById }),
       },
       include: {
         sport: {
@@ -122,8 +153,8 @@ export async function PUT(
 /**
  * DELETE /api/teams/[id]
  *
- * Delete a team. Requires teams.canDelete AND ownership (createdById) for
- * non-admin users.
+ * Delete a team. Requires teams.canDelete for non-admin users, plus the team
+ * being assigned to them.
  */
 export async function DELETE(
   request: Request,

@@ -207,15 +207,17 @@ export async function getSectionPermission(role: string, section: string): Promi
 /**
  * Require team access for a given action.
  *
- * - ADMIN: full access (always allowed).
- * - CREATOR: must have the corresponding flag (canView / canCreate / canEdit /
- *   canDelete) on the "teams" section. For edit/delete, must ALSO be the owner
- *   (createdById) of the team — unless no teamId is passed (list/create don't
- *   need ownership).
- * - INITIATOR: only canView is honored (no create/edit/delete).
+ * - ADMIN: full access (always allowed) and the only role that can reassign
+ *   team ownership (createdById).
+ * - CREATOR / INITIATOR: the corresponding flag (canView / canCreate / canEdit /
+ *   canDelete) on the "teams" section decides. Additionally, when `team` is
+ *   provided (edit/delete a team, manage its players) the team must be
+ *   assigned to the user by the administrator (createdById === userId);
+ *   unassigned teams (createdById = null) are managed by ADMIN only.
  *
  * `action`: "view" | "create" | "edit" | "delete"
- * `team`: the team record (with createdById) — required for edit/delete.
+ * `team`: the team record (with createdById) — pass it for operations on a
+ *   specific team so the assignment check is enforced.
  *
  * Returns { payload } on success, or { error } on denial.
  */
@@ -256,17 +258,16 @@ export async function requireTeamAccess(
     };
   }
 
-  // For edit/delete, CREATOR must also own the team.
-  if ((action === "edit" || action === "delete") && team) {
-    if (team.createdById !== userId) {
-      return {
-        error: NextResponse.json(
-          { error: "Solo puedes gestionar los equipos que creaste" },
-          { status: 403 },
-        ),
-        payload: null,
-      };
-    }
+  // Operations on a specific team require the team to be assigned to this
+  // user by the administrator (ADMIN manages unassigned teams itself).
+  if (team && team.createdById !== userId) {
+    return {
+      error: NextResponse.json(
+        { error: "Solo puedes gestionar los equipos que te fueron asignados" },
+        { status: 403 },
+      ),
+      payload: null,
+    };
   }
 
   return result;

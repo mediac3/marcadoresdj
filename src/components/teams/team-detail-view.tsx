@@ -103,11 +103,13 @@ function PlayerAvatar({ player, size = 'md' }: { player: Player; size?: 'sm' | '
 function PlayerCardMobile({
   player,
   canEdit,
+  canDelete,
   onEdit,
   onDelete,
 }: {
   player: Player;
   canEdit: boolean;
+  canDelete: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -147,28 +149,32 @@ function PlayerCardMobile({
         </div>
       </div>
 
-      {canEdit && (
+      {(canEdit || canDelete) && (
         <div className="flex shrink-0 gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            onClick={onEdit}
-            style={{ color: 'var(--text-muted)' }}
-            aria-label="Editar jugador"
-          >
-            <Pencil className="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            onClick={onDelete}
-            style={{ color: 'var(--accent-red)' }}
-            aria-label="Eliminar jugador"
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={onEdit}
+              style={{ color: 'var(--text-muted)' }}
+              aria-label="Editar jugador"
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={onDelete}
+              style={{ color: 'var(--accent-red)' }}
+              aria-label="Eliminar jugador"
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
         </div>
       )}
     </div>
@@ -203,22 +209,35 @@ function DetailSkeleton() {
 
 /* ── Edit Team Modal ──────────────────────────────────────────────────────── */
 
+// Radix Select can't use empty-string values, so use a sentinel for "no owner".
+const UNASSIGNED = '__unassigned__';
+
+interface CreatorOption {
+  id: string;
+  label: string;
+}
+
 function EditTeamModal({
   team,
   isOpen,
   onClose,
   onSaved,
+  isAdmin,
+  creatorOptions,
 }: {
   team: Team;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (updated: Team) => void;
+  isAdmin: boolean;
+  creatorOptions: CreatorOption[];
 }) {
   const [name, setName] = useState(team.name);
   const [shortName, setShortName] = useState(team.shortName || '');
   const [logo, setLogo] = useState(team.logo || '');
   const [gender, setGender] = useState(team.gender || 'Mixto');
   const [ageCategory, setAgeCategory] = useState(team.ageCategory || 'Libre');
+  const [assignedCreator, setAssignedCreator] = useState(team.createdById || UNASSIGNED);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { toast } = useToast();
@@ -231,6 +250,7 @@ function EditTeamModal({
       setLogo(team.logo || '');
       setGender(team.gender || 'Mixto');
       setAgeCategory(team.ageCategory || 'Libre');
+      setAssignedCreator(team.createdById || UNASSIGNED);
       setError('');
     }
   }, [isOpen, team]);
@@ -252,6 +272,10 @@ function EditTeamModal({
         logo: logo.trim() || null,
         gender,
         ageCategory,
+        // Assignment is admin-only; the API rejects it for other roles.
+        ...(isAdmin && {
+          createdById: assignedCreator === UNASSIGNED ? null : assignedCreator,
+        }),
       });
       toast({ title: 'Equipo actualizado', description: `${name.trim()} se ha actualizado.` });
       onSaved(res.team);
@@ -372,6 +396,41 @@ function EditTeamModal({
             </div>
           </div>
 
+          {/* Admin-only: team assignment. Only creators can manage the team
+              it is assigned to; unassigned teams are admin-managed. */}
+          {isAdmin && (
+            <div className="flex flex-col gap-2">
+              <Label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                Creador Asignado
+              </Label>
+              <Select value={assignedCreator} onValueChange={setAssignedCreator} disabled={loading}>
+                <SelectTrigger
+                  className="w-full"
+                  style={{
+                    background: 'var(--bg-secondary)',
+                    borderColor: 'var(--border-custom)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <SelectValue placeholder="Seleccionar creador" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNASSIGNED}>
+                    Sin asignar (solo administrador)
+                  </SelectItem>
+                  {creatorOptions.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                Los usuarios con rol Creador solo pueden editar o gestionar los equipos que se les asignen.
+              </p>
+            </div>
+          )}
+
           {error && (
             <p className="text-sm font-medium" style={{ color: 'var(--accent-red)' }}>{error}</p>
           )}
@@ -412,7 +471,13 @@ export function TeamDetailView() {
   const [team, setTeam] = useState<Team | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Granular section permissions for "teams" (ADMIN gets all enabled).
   const [canEditTeam, setCanEditTeam] = useState(false);
+  const [canCreatePlayers, setCanCreatePlayers] = useState(false);
+  const [canDeletePlayers, setCanDeletePlayers] = useState(false);
+  // ADMIN-only: team assignment editing + creator options for the select.
+  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [creatorOptions, setCreatorOptions] = useState<CreatorOption[]>([]);
 
   // Modal states
   const [editTeamOpen, setEditTeamOpen] = useState(false);
@@ -431,13 +496,32 @@ export function TeamDetailView() {
     try {
       const res = await apiGet<{ success: boolean; team: Team; currentUserId?: string; currentUserRole?: string }>(`/api/teams/${teamId}`);
       setTeam(res.team);
-      // canEdit: ADMIN always; CREATOR only if they own the team (createdById).
+      // Actions are gated by the RoleSectionPermission flags of the "teams"
+      // section (ADMIN always has everything enabled). Non-admin users can
+      // only manage teams assigned to them by the administrator; unassigned
+      // teams (createdById = null) are admin-managed.
       if (res.currentUserRole === 'ADMIN') {
+        setIsAdminUser(true);
         setCanEditTeam(true);
-      } else if (res.currentUserRole === 'CREATOR') {
-        setCanEditTeam(res.team.createdById === res.currentUserId);
+        setCanCreatePlayers(true);
+        setCanDeletePlayers(true);
       } else {
-        setCanEditTeam(false);
+        setIsAdminUser(false);
+        const assigned = !!res.currentUserId && res.team.createdById === res.currentUserId;
+        try {
+          const permRes = await apiGet<{
+            success: boolean;
+            permissions: Array<{ section: string; canCreate: boolean; canEdit: boolean; canDelete: boolean }>;
+          }>('/api/my-permissions');
+          const teamPerm = permRes.permissions?.find((p) => p.section === 'teams');
+          setCanEditTeam(!!teamPerm?.canEdit && assigned);
+          setCanCreatePlayers(!!teamPerm?.canCreate && assigned);
+          setCanDeletePlayers(!!teamPerm?.canDelete && assigned);
+        } catch {
+          setCanEditTeam(false);
+          setCanCreatePlayers(false);
+          setCanDeletePlayers(false);
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al cargar el equipo';
@@ -447,9 +531,31 @@ export function TeamDetailView() {
     }
   }, [teamId]);
 
+  // Load creator users for the admin-only assignment select.
+  const fetchCreatorOptions = useCallback(async () => {
+    try {
+      const res = await apiGet<{
+        success: boolean;
+        users: Array<{ id: string; username: string; name: string | null; role: string; isActive: boolean }>;
+      }>('/api/auth/users');
+      setCreatorOptions(
+        (res.users || [])
+          .filter((u) => u.role === 'CREATOR' && u.isActive)
+          .map((u) => ({ id: u.id, label: u.name ? `${u.name} (@${u.username})` : `@${u.username}` })),
+      );
+    } catch {
+      // Non-admin users can't list users; the select stays hidden for them.
+      setCreatorOptions([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTeam();
   }, [fetchTeam]);
+
+  useEffect(() => {
+    fetchCreatorOptions();
+  }, [fetchCreatorOptions]);
 
   async function handleDeletePlayer() {
     if (!deleteTarget) return;
@@ -564,34 +670,40 @@ export function TeamDetailView() {
           </div>
         </div>
 
-        {canEditTeam && (
+        {(canEditTeam || canCreatePlayers) && (
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="h-9 text-sm"
-              onClick={() => setEditTeamOpen(true)}
-              style={{ borderColor: 'var(--border-custom)', color: 'var(--text-secondary)' }}
-            >
-              <Pencil className="size-3.5" />
-              Editar
-            </Button>
-            <Button
-              className="h-9 text-sm"
-              onClick={() => setAddPlayerOpen(true)}
-              style={{ background: 'var(--accent)', color: '#fff' }}
-            >
-              <Plus className="size-3.5" />
-              Agregar Jugador
-            </Button>
-            <Button
-              variant="outline"
-              className="h-9 text-sm"
-              onClick={() => setImportOpen(true)}
-              style={{ borderColor: 'var(--border-custom)', color: 'var(--text-secondary)' }}
-            >
-              <Upload className="size-3.5" />
-              Importar
-            </Button>
+            {canEditTeam && (
+              <Button
+                variant="outline"
+                className="h-9 text-sm"
+                onClick={() => setEditTeamOpen(true)}
+                style={{ borderColor: 'var(--border-custom)', color: 'var(--text-secondary)' }}
+              >
+                <Pencil className="size-3.5" />
+                Editar
+              </Button>
+            )}
+            {canCreatePlayers && (
+              <>
+                <Button
+                  className="h-9 text-sm"
+                  onClick={() => setAddPlayerOpen(true)}
+                  style={{ background: 'var(--accent)', color: '#fff' }}
+                >
+                  <Plus className="size-3.5" />
+                  Agregar Jugador
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-9 text-sm"
+                  onClick={() => setImportOpen(true)}
+                  style={{ borderColor: 'var(--border-custom)', color: 'var(--text-secondary)' }}
+                >
+                  <Upload className="size-3.5" />
+                  Importar
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -610,11 +722,11 @@ export function TeamDetailView() {
             No hay jugadores en este equipo
           </p>
           <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-            {canEditTeam
+            {canCreatePlayers
               ? 'Agrega jugadores al equipo para comenzar.'
               : 'Aún no se han registrado jugadores.'}
           </p>
-          {canEditTeam && (
+          {canCreatePlayers && (
             <Button
               className="mt-4 h-9 text-sm"
               onClick={() => setAddPlayerOpen(true)}
@@ -634,6 +746,7 @@ export function TeamDetailView() {
                 key={player.id}
                 player={player}
                 canEdit={canEditTeam}
+                canDelete={canDeletePlayers}
                 onEdit={() => setEditPlayer(player)}
                 onDelete={() => setDeleteTarget(player)}
               />
@@ -650,7 +763,7 @@ export function TeamDetailView() {
                   <TableHead style={{ color: 'var(--text-muted)' }}>Nombre</TableHead>
                   <TableHead style={{ color: 'var(--text-muted)', width: '150px' }}>Posición</TableHead>
                   <TableHead style={{ color: 'var(--text-muted)', width: '100px' }}>Apodo</TableHead>
-                  {canEditTeam && (
+                  {(canEditTeam || canDeletePlayers) && (
                     <TableHead style={{ color: 'var(--text-muted)', width: '100px' }} className="text-right">
                       Acciones
                     </TableHead>
@@ -693,29 +806,33 @@ export function TeamDetailView() {
                         {player.nickname || '—'}
                       </span>
                     </TableCell>
-                    {canEditTeam && (
+                    {(canEditTeam || canDeletePlayers) && (
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => setEditPlayer(player)}
-                            style={{ color: 'var(--text-muted)' }}
-                            aria-label="Editar jugador"
-                          >
-                            <Pencil className="size-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => setDeleteTarget(player)}
-                            style={{ color: 'var(--accent-red)' }}
-                            aria-label="Eliminar jugador"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
+                          {canEditTeam && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8"
+                              onClick={() => setEditPlayer(player)}
+                              style={{ color: 'var(--text-muted)' }}
+                              aria-label="Editar jugador"
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                          )}
+                          {canDeletePlayers && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8"
+                              onClick={() => setDeleteTarget(player)}
+                              style={{ color: 'var(--accent-red)' }}
+                              aria-label="Eliminar jugador"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     )}
@@ -734,6 +851,8 @@ export function TeamDetailView() {
           isOpen={editTeamOpen}
           onClose={() => setEditTeamOpen(false)}
           onSaved={handleTeamUpdated}
+          isAdmin={isAdminUser}
+          creatorOptions={creatorOptions}
         />
       )}
 

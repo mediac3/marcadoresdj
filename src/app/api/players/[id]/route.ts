@@ -1,35 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { verifyToken, extractBearerToken } from "@/lib/auth";
+import { requireTeamAccess } from "@/lib/event-auth";
 
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Authorization token is required" },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
-    }
-
-    if (payload.role !== "ADMIN" && payload.role !== "CREATOR") {
-      return NextResponse.json(
-        { error: "Creator or Admin access required" },
-        { status: 403 }
-      );
-    }
-
     const { id } = await params;
 
     const existing = await db.player.findUnique({ where: { id } });
@@ -39,6 +16,15 @@ export async function PUT(
         { status: 404 }
       );
     }
+
+    // Editing a player requires teams.canEdit (ADMIN always allowed) and, for
+    // non-admin users, the player's team to be assigned to them.
+    const team = await db.team.findUnique({
+      where: { id: existing.teamId },
+      select: { createdById: true },
+    });
+    const { error } = await requireTeamAccess(request, "edit", team);
+    if (error) return error;
 
     const body = await request.json();
     const {
@@ -89,29 +75,6 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Authorization token is required" },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
-    }
-
-    if (payload.role !== "ADMIN" && payload.role !== "CREATOR") {
-      return NextResponse.json(
-        { error: "Creator or Admin access required" },
-        { status: 403 }
-      );
-    }
-
     const { id } = await params;
 
     const existing = await db.player.findUnique({ where: { id } });
@@ -121,6 +84,15 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    // Deleting a player requires teams.canDelete (ADMIN always allowed) and,
+    // for non-admin users, the player's team to be assigned to them.
+    const team = await db.team.findUnique({
+      where: { id: existing.teamId },
+      select: { createdById: true },
+    });
+    const { error } = await requireTeamAccess(request, "delete", team);
+    if (error) return error;
 
     await db.player.delete({ where: { id } });
 

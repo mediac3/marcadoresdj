@@ -8,8 +8,8 @@ import { requireTeamAccess } from "@/lib/event-auth";
  * Returns teams visible to the authenticated user.
  * - ADMIN: all teams.
  * - CREATOR / INITIATOR: requires teams.canView. Returns all teams (so they
- *   can be picked when creating events); the client hides edit/delete buttons
- *   for teams the user does not own via createdById.
+ *   can be picked when creating events); the client gates edit/create/delete
+ *   actions using the RoleSectionPermission flags from /api/my-permissions.
  */
 export async function GET(request: Request) {
   try {

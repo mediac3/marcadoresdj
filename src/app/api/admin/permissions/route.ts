@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/event-auth";
 
-// Sections available for permission management
-export const PERMISSION_SECTIONS = [
+// Sections available for permission management (not exported: route files may
+// only export handlers/config).
+const PERMISSION_SECTIONS = [
   { key: "events", label: "Eventos" },
   { key: "teams", label: "Equipos" },
   { key: "sports", label: "Deportes" },
@@ -15,17 +16,17 @@ export const PERMISSION_SECTIONS = [
   { key: "payments", label: "Pagos de Tarjetas" },
 ] as const;
 
-export const PERMISSION_ROLES = ["CREATOR", "INITIATOR"] as const;
+const PERMISSION_ROLES = ["CREATOR", "INITIATOR"] as const;
 
 /**
  * GET /api/admin/permissions
  * Returns all role-section permissions as a matrix for the admin panel.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { error } = await requireAdmin({ headers: new Headers() } as Request);
-    // If no token on direct call, that's fine for the internal use case
-    // Real auth is handled below
+    const { error } = await requireAdmin(request);
+    if (error) return error;
+
     const permissions = await db.roleSectionPermission.findMany({
       orderBy: [{ role: "asc" }, { section: "asc" }],
     });
@@ -49,12 +50,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     // Auth via token
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader) {
-      return NextResponse.json({ error: "Token requerido" }, { status: 401 });
-    }
-    const { requireAdmin: checkAdmin } = await import("@/lib/event-auth");
-    const { error } = await checkAdmin(request);
+    const { error } = await requireAdmin(request);
     if (error) return error;
 
     const body = await request.json();

@@ -20,6 +20,7 @@ import {
   Shield,
   SlidersHorizontal as SlidersIcon,
   FileText,
+  ClipboardList,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -50,6 +51,7 @@ import { TournamentsPanel } from '@/components/admin/tournaments-panel';
 import { EventWizard } from '@/components/events/event-wizard';
 import { EventListView } from '@/components/events/event-list-view';
 import { EventReportView } from '@/components/events/event-report-view';
+import { PlayerActionsView } from '@/components/actions/player-actions-view';
 import { PublicView } from '@/components/public/public-view';
 import { useAppStore, type ThemeName, type AppView } from '@/lib/store';
 
@@ -68,6 +70,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Eventos', icon: Trophy, view: { page: 'EVENT_LIST' }, sectionKey: 'events' },
   { label: 'Equipos', icon: Users, view: { page: 'TEAMS' }, sectionKey: 'teams' },
   { label: 'Público', icon: Globe, view: { page: 'PUBLIC_VIEW' } },
+  { label: 'Acciones y Pagos', icon: ClipboardList, view: { page: 'PLAYER_ACTIONS' }, sectionKey: 'payments' },
   { label: 'Usuarios', icon: UserCog, view: { page: 'ADMIN_USERS' }, adminOnly: true, sectionKey: 'users' },
   { label: 'Deportes', icon: Settings, view: { page: 'ADMIN_SPORTS' }, adminOnly: true, sectionKey: 'sports' },
   { label: 'Ubicaciones', icon: MapPin, view: { page: 'ADMIN_LOCATIONS' }, adminOnly: true, sectionKey: 'locations' },
@@ -119,6 +122,8 @@ function ViewRouter() {
       return <TeamsView />;
     case 'TEAM_DETAIL':
       return <TeamDetailView />;
+    case 'PLAYER_ACTIONS':
+      return <PlayerActionsView />;
     case 'CREATE_EVENT':
       return <EventWizard />;
     case 'SCORING':
@@ -399,7 +404,7 @@ export function AppShell() {
           height: 'calc(60px + env(safe-area-inset-bottom, 0px))',
         }}
       >
-        {visibleNavItems.slice(0, 4).map((item) => {
+        {visibleNavItems.slice(0, 5).map((item) => {
           const active = currentView.page === item.view.page;
           const Icon = item.icon;
           return (

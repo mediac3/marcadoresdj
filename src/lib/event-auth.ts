@@ -272,6 +272,53 @@ export async function requireTeamAccess(
   return result;
 }
 
+/**
+ * Require access to a generic permission section (e.g. "payments").
+ *
+ * - ADMIN: full access (always allowed).
+ * - CREATOR / INITIATOR: honors the RoleSectionPermission flags for the
+ *   section; if no row exists, all flags default to false.
+ *
+ * `action`: "view" | "create" | "edit" | "delete"
+ *
+ * Returns { payload } on success, or { error } on denial.
+ */
+export async function requireSectionAccess(
+  request: Request,
+  section: string,
+  action: "view" | "create" | "edit" | "delete",
+): Promise<AuthResult> {
+  const result = await requireAuth(request);
+  if (result.error) return result;
+  if (!result.payload) {
+    return {
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      payload: null,
+    };
+  }
+
+  if (result.payload.role === "ADMIN") return result;
+
+  const perm = await getSectionPermission(result.payload.role, section);
+  const flag =
+    action === "view" ? perm.canView
+    : action === "create" ? perm.canCreate
+    : action === "edit" ? perm.canEdit
+    : perm.canDelete;
+
+  if (!flag) {
+    return {
+      error: NextResponse.json(
+        { error: `No tienes permiso para ${actionLabel(action)} en esta sección` },
+        { status: 403 },
+      ),
+      payload: null,
+    };
+  }
+
+  return result;
+}
+
 function actionLabel(action: string): string {
   switch (action) {
     case "view": return "ver";

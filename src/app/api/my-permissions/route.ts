@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     if (payload.role === "ADMIN") {
       const allSections = [
         "events", "teams", "sports", "locations",
-        "publications", "ads", "analytics", "tournaments",
+        "publications", "ads", "analytics", "tournaments", "payments",
       ];
       return NextResponse.json({
         success: true,

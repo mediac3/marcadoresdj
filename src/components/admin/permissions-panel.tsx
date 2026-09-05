@@ -71,6 +71,7 @@ const SECTIONS: SectionDef[] = [
   { key: 'ads', label: 'Publicidad' },
   { key: 'analytics', label: 'Analíticas' },
   { key: 'tournaments', label: 'Torneos' },
+  { key: 'payments', label: 'Pagos de Tarjetas' },
 ];
 
 const ROLES = ['CREATOR', 'INITIATOR'] as const;

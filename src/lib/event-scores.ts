@@ -3,7 +3,9 @@ import { db } from "@/lib/db";
 /**
  * Recalculate scores for an event based on all its actions.
  *
- * Any EventAction where `value > 0` contributes to the score.
+ * Any EventAction where `value > 0` contributes to the score,
+ * EXCEPT card actions (SportAction with isCard=true) — cards are
+ * administrative/fine events and never add points.
  * The player's team determines which side gets the points.
  * OWN_GOAL is special: it contributes to the OPPOSITE team.
  *
@@ -14,12 +16,19 @@ import { db } from "@/lib/db";
 export async function recalculateScores(eventId: string): Promise<{ scoreA: number; scoreB: number }> {
   const event = await db.event.findUnique({
     where: { id: eventId },
-    select: { teamAId: true, teamBId: true },
+    select: { teamAId: true, teamBId: true, sportId: true },
   });
 
   if (!event) {
     throw new Error("Event not found");
   }
+
+  // Card actions (payable cards) never contribute to the score
+  const cardActions = await db.sportAction.findMany({
+    where: { sportId: event.sportId, isCard: true },
+    select: { name: true },
+  });
+  const cardTypes = new Set(cardActions.map((c) => c.name));
 
   const actions = await db.eventAction.findMany({
     where: {
@@ -37,6 +46,9 @@ export async function recalculateScores(eventId: string): Promise<{ scoreA: numb
   let scoreB = 0;
 
   for (const action of actions) {
+    // Cards don't score
+    if (cardTypes.has(action.actionType)) continue;
+
     const value = action.value || 1;
 
     if (action.player) {

@@ -59,10 +59,11 @@ async function seed() {
   console.log('✅ Sports created:', futbol.name, baloncesto.name, microfutbol.name);
 
   // 3. Create Sport Actions for Fútbol
+  // Tarjetas pagables: isCard=true + cardAmount (multa por defecto en COP)
   const futbolActions = [
     { name: 'GOAL', label: 'Gol', icon: '⚽', color: '#22c55e', sortOrder: 0, defaultValue: 1 },
-    { name: 'YELLOW_CARD', label: 'Amarilla', icon: '🟨', color: '#eab308', sortOrder: 1 },
-    { name: 'RED_CARD', label: 'Roja', icon: '🟥', color: '#ef4444', sortOrder: 2 },
+    { name: 'YELLOW_CARD', label: 'Amarilla', icon: '🟨', color: '#eab308', sortOrder: 1, isCard: true, cardAmount: 5000 },
+    { name: 'RED_CARD', label: 'Roja', icon: '🟥', color: '#ef4444', sortOrder: 2, isCard: true, cardAmount: 20000 },
     { name: 'SUBSTITUTION', label: 'Cambio', icon: '🔄', color: '#3b82f6', sortOrder: 3 },
     { name: 'CORNER', label: 'Córner', icon: '📐', color: '#a855f7', sortOrder: 4 },
     { name: 'FOUL', label: 'Falta', icon: '⚠️', color: '#f97316', sortOrder: 5 },
@@ -77,7 +78,11 @@ async function seed() {
   for (const action of futbolActions) {
     await prisma.sportAction.upsert({
       where: { name_sportId: { name: action.name, sportId: futbol.id } },
-      update: { defaultValue: (action as Record<string, unknown>).defaultValue as number ?? 1 },
+      update: {
+        defaultValue: (action as Record<string, unknown>).defaultValue as number ?? 1,
+        // Re-seeding never unsets custom card flags; it only (re)asserts known cards
+        ...(action.isCard ? { isCard: true, cardAmount: action.cardAmount ?? 0 } : {}),
+      },
       create: { ...action, sportId: futbol.id },
     });
   }
@@ -109,9 +114,9 @@ async function seed() {
   // 5. Create Sport Actions for Microfútbol
   const microfutbolActions = [
     { name: 'FUTSAL_GOAL', label: 'Gol', icon: '⚽', color: '#22c55e', sortOrder: 0, defaultValue: 1 },
-    { name: 'FUTSAL_YELLOW', label: 'Amarilla', icon: '🟨', color: '#eab308', sortOrder: 1 },
-    { name: 'FUTSAL_BLUE', label: 'Azul (2 min)', icon: '🟦', color: '#3b82f6', sortOrder: 2 },
-    { name: 'FUTSAL_RED', label: 'Roja', icon: '🟥', color: '#ef4444', sortOrder: 3 },
+    { name: 'FUTSAL_YELLOW', label: 'Amarilla', icon: '🟨', color: '#eab308', sortOrder: 1, isCard: true, cardAmount: 5000 },
+    { name: 'FUTSAL_BLUE', label: 'Azul (2 min)', icon: '🟦', color: '#3b82f6', sortOrder: 2, isCard: true, cardAmount: 10000 },
+    { name: 'FUTSAL_RED', label: 'Roja', icon: '🟥', color: '#ef4444', sortOrder: 3, isCard: true, cardAmount: 20000 },
     { name: 'FUTSAL_SUB', label: 'Cambio', icon: '🔄', color: '#a855f7', sortOrder: 4 },
     { name: 'FUTSAL_FOUL', label: 'Falta', icon: '⚠️', color: '#f97316', sortOrder: 5 },
     { name: 'FUTSAL_TIMEOUT', label: 'Tiempo Muerto', icon: '⏸️', color: '#64748b', sortOrder: 6 },
@@ -121,7 +126,10 @@ async function seed() {
   for (const action of microfutbolActions) {
     await prisma.sportAction.upsert({
       where: { name_sportId: { name: action.name, sportId: microfutbol.id } },
-      update: { defaultValue: (action as Record<string, unknown>).defaultValue as number ?? 1 },
+      update: {
+        defaultValue: (action as Record<string, unknown>).defaultValue as number ?? 1,
+        ...(action.isCard ? { isCard: true, cardAmount: action.cardAmount ?? 0 } : {}),
+      },
       create: { ...action, sportId: microfutbol.id },
     });
   }

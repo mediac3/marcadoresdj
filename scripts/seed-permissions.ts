@@ -48,6 +48,7 @@ async function main() {
     { role: 'CREATOR', section: 'analytics', canView: true, canCreate: false, canEdit: false, canDelete: false },
     { role: 'CREATOR', section: 'sports', canView: true, canCreate: false, canEdit: false, canDelete: false },
     { role: 'CREATOR', section: 'locations', canView: true, canCreate: false, canEdit: false, canDelete: false },
+    { role: 'CREATOR', section: 'payments', canView: true, canCreate: false, canEdit: true, canDelete: false },
   ];
 
   // INITIATOR: view events only, scoring via EventAccess

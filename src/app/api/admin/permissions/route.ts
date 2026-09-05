@@ -12,6 +12,7 @@ export const PERMISSION_SECTIONS = [
   { key: "ads", label: "Publicidad" },
   { key: "analytics", label: "Analíticas" },
   { key: "tournaments", label: "Torneos" },
+  { key: "payments", label: "Pagos de Tarjetas" },
 ] as const;
 
 export const PERMISSION_ROLES = ["CREATOR", "INITIATOR"] as const;

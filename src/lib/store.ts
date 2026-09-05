@@ -17,6 +17,8 @@ interface SportAction {
   color: string;
   sortOrder: number;
   defaultValue: number;
+  isCard?: boolean;
+  cardAmount?: number;
   sportId: string;
 }
 
@@ -69,7 +71,20 @@ interface EventAction {
   value: number;
   half: string | null;
   userId: string;
+  cardPayment?: CardPayment | null;
   createdAt: string;
+}
+
+interface CardPayment {
+  id: string;
+  eventActionId: string;
+  amount: number;
+  status: 'PENDING' | 'PAID';
+  paidAt: string | null;
+  note: string | null;
+  paidBy?: { username: string; name: string | null } | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface Comment {
@@ -130,6 +145,7 @@ type AppView =
   | { page: 'ADMIN_TERMS' }
   | { page: 'TEAMS' }
   | { page: 'TEAM_DETAIL'; teamId: string }
+  | { page: 'PLAYER_ACTIONS' }
   | { page: 'CREATE_EVENT' }
   | { page: 'EVENT_LIST' }
   | { page: 'SCORING'; eventId: string }
@@ -304,6 +320,7 @@ export type {
   Team,
   Player,
   EventAction,
+  CardPayment,
   Comment,
   SportEvent,
   AppView,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { verifyToken, extractBearerToken } from "@/lib/auth";
+import { requireSectionAccess } from "@/lib/event-auth";
 
 export async function GET(
   request: Request,
@@ -118,6 +119,70 @@ export async function POST(
     });
 
     return NextResponse.json({ success: true, action }, { status: 201 });
+  } catch {
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PUT /api/sports/[id]/actions
+ * Update card config (isCard / cardAmount) of an existing SportAction.
+ * Guarded by the "payments" section so Creators with payment-edit access
+ * can manage card tariffs; ADMIN always allowed.
+ * Body: { actionId: string, isCard?: boolean, cardAmount?: number }
+ */
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { error } = await requireSectionAccess(request, "payments", "edit");
+    if (error) return error;
+
+    const { id } = await params;
+
+    const sport = await db.sport.findUnique({ where: { id } });
+    if (!sport) {
+      return NextResponse.json({ error: "Sport not found" }, { status: 404 });
+    }
+
+    const body = await request.json();
+    const { actionId, isCard, cardAmount } = body as {
+      actionId?: string;
+      isCard?: boolean;
+      cardAmount?: number;
+    };
+
+    if (!actionId) {
+      return NextResponse.json({ error: "actionId es requerido" }, { status: 400 });
+    }
+    if (cardAmount != null && (typeof cardAmount !== "number" || isNaN(cardAmount) || cardAmount < 0)) {
+      return NextResponse.json({ error: "cardAmount inválido" }, { status: 400 });
+    }
+
+    const action = await db.sportAction.findUnique({
+      where: { id: actionId },
+    });
+    if (!action || action.sportId !== id) {
+      return NextResponse.json(
+        { error: "Acción no encontrada en este deporte" },
+        { status: 404 }
+      );
+    }
+
+    const data: { isCard?: boolean; cardAmount?: number } = {};
+    if (typeof isCard === "boolean") data.isCard = isCard;
+    if (typeof cardAmount === "number") data.cardAmount = cardAmount;
+
+    const updated = await db.sportAction.update({
+      where: { id: actionId },
+      data,
+    });
+
+    return NextResponse.json({ success: true, action: updated });
   } catch {
     return NextResponse.json(
       { error: "Internal server error" },

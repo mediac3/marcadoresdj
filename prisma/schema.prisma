@@ -29,6 +29,7 @@ model User {
   tournamentsCreated  Tournament[]  @relation("TournamentCreator")
   teamsCreated        Team[]        @relation("TeamCreator")
   termsAcceptances    EventTermsAcceptance[] @relation("TermsAcceptanceGuest")
+  cardPaymentsRegistered CardPayment[] @relation("CardPaymentRegistrar")
 }
 
 model Sport {
@@ -52,6 +53,8 @@ model SportAction {
   color       String   @default("#ffffff")
   sortOrder   Int      @default(0)
   defaultValue Int     @default(1) // Points value per click (1 = default, 2 = canasta, 3 = triple, etc.)
+  isCard      Boolean  @default(false) // Payable card (player must pay a fine)
+  cardAmount  Float    @default(0) // Default fine amount for this card
   sportId     String
   sport       Sport    @relation(fields: [sportId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
@@ -198,8 +201,27 @@ model EventAction {
   half       String? // which half
   userId     String
   user       User     @relation(fields: [userId], references: [id])
+  cardPayment CardPayment? // fine/payment when this action is a payable card
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CARD PAYMENTS (fines for card actions — players must pay for their cards)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+model CardPayment {
+  id            String      @id @default(cuid())
+  eventActionId String      @unique
+  eventAction   EventAction @relation(fields: [eventActionId], references: [id], onDelete: Cascade)
+  amount        Float       @default(0) // fine amount (snapshot of SportAction.cardAmount at creation, editable)
+  status        String      @default("PENDING") // PENDING | PAID
+  paidAt        DateTime?   // when the payment was registered
+  paidById      String?     // user who registered the payment
+  paidBy        User?       @relation("CardPaymentRegistrar", fields: [paidById], references: [id], onDelete: SetNull)
+  note          String?     // optional note (e.g. "pagó en efectivo")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 }
 
 model Comment {

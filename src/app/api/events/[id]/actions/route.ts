@@ -153,6 +153,26 @@ export async function POST(
     // Recalculate scores after creating action
     const scores = await recalculateScores(id);
 
+    // If this action is a payable card, create its pending CardPayment.
+    // Wrapped in try/catch: a payment issue must never break the scoring flow.
+    try {
+      const sportAction = await db.sportAction.findUnique({
+        where: { name_sportId: { name: actionType, sportId: event.sportId } },
+        select: { isCard: true, cardAmount: true },
+      });
+      if (sportAction?.isCard) {
+        await db.cardPayment.create({
+          data: {
+            eventActionId: action.id,
+            amount: sportAction.cardAmount,
+            status: "PENDING",
+          },
+        });
+      }
+    } catch (err) {
+      console.error("CardPayment creation failed (non-fatal):", err);
+    }
+
     return NextResponse.json(
       { success: true, action, scores },
       { status: 201 }

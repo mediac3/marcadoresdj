@@ -33,6 +33,14 @@ next-env.d.ts
 !db/custom.db
 /prisma/migrations/dev.db*
 
+# ─── BD viva de producción (pm2 / despliegues directos) ──────────────────────
+# La BD de producción debe vivir en data/custom.db (fuera de git) para que
+# `git pull` / redeploys JAMÁS la pisen. Apuntar DATABASE_URL ahí en .env.
+/data/*.db
+/data/*.db-journal
+/data/*.db-shm
+/data/*.db-wal
+
 # ─── Producción ──────────────────────────────────────────────────────────────
 /dist/
 /standalone/

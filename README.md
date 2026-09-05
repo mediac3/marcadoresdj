@@ -332,6 +332,36 @@ El repositorio incluye los scripts oficiales de despliegue en `.zscripts/` (comp
 > tarjetas por deporte en **Acciones y Pagos → Tarifas**; los pagos pendientes
 > de tarjetas pasadas se crean solos al abrir la sección.
 
+### Despliegue con pm2 (servidor propio, p. ej. /var/www)
+
+**Regla crítica:** la BD viva debe vivir en `data/custom.db` (ignorada por
+git). Si vive en `db/custom.db`, cada `git pull` la sobrescribirá con el
+snapshot del repo y se perderán los datos nuevos.
+
+Migración de una instalación existente (una sola vez):
+
+```bash
+cd /var/www/marcadoresdj.com
+pm2 stop <app>                                   # ver nombre con: pm2 list
+
+mkdir -p data
+cp db/custom.db data/custom.db                   # BD viva fuera de git
+sed -i 's|^DATABASE_URL=.*|DATABASE_URL="file:/var/www/marcadoresdj.com/data/custom.db"|' .env
+
+pm2 restart <app> --update-env
+pm2 logs <app> --lines 20                        # verificar arranque
+```
+
+Despliegues posteriores (la BD en `data/` nunca se toca):
+
+```bash
+cd /var/www/marcadoresdj.com
+git pull && npm install && npx prisma generate && npm run build
+# aplicar tablas/columnas nuevas a la BD viva (no destructivo):
+DATABASE_URL="file:/var/www/marcadoresdj.com/data/custom.db" npx prisma db push --skip-generate
+pm2 restart <app>
+```
+
 ### Variables de entorno en producción
 
 Configura en tu panel de xcloud.host:

@@ -19,11 +19,30 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useAppStore, type SportEvent, type SportAction, type Player } from '@/lib/store';
-import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { useAppStore, type SportEvent, type SportAction, type Player, type EventAction, type Comment } from '@/lib/store';
+import { apiGet, apiPost, apiDelete, OfflineError } from '@/lib/api';
 import { useMatchTimer } from '@/hooks/use-match-timer';
 import { removeTimer } from '@/lib/global-timer';
 import { SPORT_HALVES } from '@/lib/constants';
+import { useOfflineStore } from '@/lib/offline/offline-store';
+import {
+  cacheEvent,
+  getCachedEvent,
+  getOpsForEventOrdered,
+  cacheRead,
+  getCachedRead,
+  enqueueTimer,
+  enqueueStart,
+  enqueuePauseTo,
+  enqueueEnd,
+  enqueueActionCreate,
+  enqueueActionDelete,
+  newActionId,
+  enqueueCommentCreate,
+  newCommentId,
+} from '@/lib/offline/queue';
+import { replayOpsOnEvent } from '@/lib/offline/event-replay';
+import { computeScores } from '@/lib/score-computation';
 import { CounterButton } from '@/components/scoring/counter-button';
 import { MatchTimer } from '@/components/scoring/match-timer';
 import { CommentsPanel } from '@/components/scoring/comments-panel';
@@ -157,8 +176,18 @@ function abbrPos(pos: string): string {
 export function ScoringView() {
   const navigate = useAppStore((s) => s.navigate);
   const currentView = useAppStore((s) => s.currentView);
+  const user = useAppStore((s) => s.user);
   const eventId =
     currentView.page === 'SCORING' ? currentView.eventId : '';
+
+  /* ── Offline state ───────────────────────────────────────────────────── */
+
+  const isOnline = useOfflineStore((s) => s.isOnline);
+  const syncVersion = useOfflineStore((s) => s.syncVersion);
+  // Ref mirror so callbacks always see the latest connectivity without
+  // re-creating their dependency arrays (avoids stale closures).
+  const isOfflineRef = useRef(false);
+  isOfflineRef.current = !isOnline;
 
   /* ── Local state ─────────────────────────────────────────────────────── */
 
@@ -214,6 +243,34 @@ export function ScoringView() {
     event?.status === 'LIVE' || event?.status === 'PAUSED';
   const isScheduled = event?.status === 'SCHEDULED';
   const isFinished = event?.status === 'FINISHED';
+
+  /* ── Local score computation (offline / pending-sync actions) ────────── */
+
+  // Card actions never score — derive their names from the sport catalog.
+  const cardTypes = useMemo(
+    () =>
+      new Set(
+        sportActions.filter((a) => a.isCard).map((a) => a.name),
+      ),
+    [sportActions],
+  );
+
+  // Offline (or with locally created actions) the action list is the
+  // source of truth; online the server scores are authoritative.
+  const useLocalScores =
+    !isOnline || (event?.actions ?? []).some((a) => a.pendingSync);
+  const localScores = useMemo(() => {
+    if (!useLocalScores || !event) return null;
+    return computeScores({
+      actions: event.actions ?? [],
+      teamAId: event.teamAId,
+      teamBId: event.teamBId,
+      cardTypes,
+    });
+  }, [useLocalScores, event, cardTypes]);
+  const scoreADisplay = localScores?.scoreA ?? event?.scoreA ?? 0;
+  const scoreBDisplay = localScores?.scoreB ?? event?.scoreB ?? 0;
+
   const sportName = event?.sport?.name ?? '';
   const halfOptions = useMemo(
     () => getHalfOptions(sportName),
@@ -227,31 +284,62 @@ export function ScoringView() {
 
   /* ── Data fetching ───────────────────────────────────────────────────── */
 
-  /** Full fetch (initial load, explicit sync). Resets serverElapsed. */
+  /** Full fetch (initial load, explicit sync). Resets serverElapsed.
+   *  Offline: falls back to the last cached copy with queued ops replayed. */
   const fetchEventFull = useCallback(async () => {
     try {
       const data = await apiGet<{
         success: boolean;
         event: SportEvent;
       }>(`/api/events/${eventId}`);
+      await cacheEvent(data.event);
       setEvent(data.event);
       setServerElapsed(data.event.elapsedSeconds);
       return data.event;
     } catch (err) {
+      if (err instanceof OfflineError) {
+        // Fallback chain: last event snapshot → cached event list (the
+        // list GET includes full rosters, enough to operate offline).
+        let cached = await getCachedEvent<SportEvent>(eventId);
+        if (!cached) {
+          const list = await getCachedRead<SportEvent[]>('read:/api/events');
+          cached = list?.find((e) => e.id === eventId) ?? null;
+        }
+        if (cached) {
+          // Reconstruct the effective state: snapshot + offline ops.
+          const ops = await getOpsForEventOrdered(eventId);
+          const effective =
+            ops.length > 0 && user
+              ? replayOpsOnEvent(cached, ops, {
+                  user: {
+                    id: user.id,
+                    username: user.username,
+                    name: user.name,
+                  },
+                })
+              : cached;
+          setEvent(effective);
+          setServerElapsed(effective.elapsedSeconds);
+          toast.info('Sin conexión — mostrando datos guardados localmente');
+          return effective;
+        }
+      }
       toast.error(
         err instanceof Error ? err.message : 'Error al cargar el evento',
       );
       return null;
     }
-  }, [eventId]);
+  }, [eventId, user]);
 
   /** Lightweight fetch (after actions/comments). Preserves serverElapsed. */
   const refreshActions = useCallback(async () => {
+    if (isOfflineRef.current) return; // local state is authoritative offline
     try {
       const data = await apiGet<{
         success: boolean;
         event: SportEvent;
       }>(`/api/events/${eventId}`);
+      await cacheEvent(data.event);
       setEvent((prev) => {
         if (!prev) return data.event;
         return { ...data.event, elapsedSeconds: prev.elapsedSeconds };
@@ -263,13 +351,23 @@ export function ScoringView() {
 
   const fetchSportActions = useCallback(
     async (sportId: string) => {
+      const cacheKey = `sports:${sportId}:actions`;
       try {
         const data = await apiGet<{
           success: boolean;
           actions: SportAction[];
         }>(`/api/sports/${sportId}/actions`);
         setSportActions(data.actions);
-      } catch {
+        await cacheRead(cacheKey, data.actions);
+      } catch (err) {
+        // Offline: the grid still needs the action catalog.
+        if (err instanceof OfflineError) {
+          const cached = await getCachedRead<SportAction[]>(cacheKey);
+          if (cached && cached.length > 0) {
+            setSportActions(cached);
+            return;
+          }
+        }
         toast.error('Error al cargar las acciones del deporte');
       }
     },
@@ -302,6 +400,12 @@ export function ScoringView() {
     const ev = eventRef.current;
     const t = timerHookRef.current;
     if (!ev || ev.status === 'SCHEDULED' || ev.status === 'FINISHED') return;
+    // Offline: keep a coalesced snapshot queued (last-write-wins).
+    if (isOfflineRef.current) {
+      await enqueueTimer(eventId, t.totalSeconds, ev.currentHalf ?? undefined);
+      setServerElapsed(t.totalSeconds);
+      return;
+    }
     try {
       await apiPost(`/api/events/${eventId}/timer`, {
         elapsedSeconds: t.totalSeconds,
@@ -325,6 +429,13 @@ export function ScoringView() {
     };
   }, [isRunning, syncTimerToServer]);
 
+  /* After a sync pass completes, refetch so the view reflects the server. */
+  useEffect(() => {
+    if (syncVersion > 0) {
+      void fetchEventFull();
+    }
+  }, [syncVersion, fetchEventFull]);
+
   /* ── Event lifecycle handlers ────────────────────────────────────────── */
 
   const handleTimerToggle = useCallback(async () => {
@@ -332,6 +443,38 @@ export function ScoringView() {
     if (!ev || busy) return;
     setBusy(true);
     try {
+      // ── Offline: optimistic local transition + queued op ──
+      if (isOfflineRef.current) {
+        const t = timerHookRef.current.totalSeconds;
+        if (ev.status === 'SCHEDULED') {
+          await enqueueTimer(eventId, t, ev.currentHalf ?? '1');
+          await enqueueStart(eventId);
+          setEvent((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: 'LIVE',
+                  startedAt:
+                    prev.startedAt ?? new Date().toISOString(),
+                  currentHalf: prev.currentHalf ?? '1',
+                  elapsedSeconds: t,
+                }
+              : prev,
+          );
+        } else {
+          const next = ev.status === 'LIVE' ? 'PAUSED' : 'LIVE';
+          await enqueueTimer(eventId, t, ev.currentHalf ?? undefined);
+          await enqueuePauseTo(eventId, next);
+          setEvent((prev) =>
+            prev ? { ...prev, status: next, elapsedSeconds: t } : prev,
+          );
+        }
+        setServerElapsed(t);
+        toast.info('Guardado sin conexión — se sincronizará al recuperar internet');
+        return;
+      }
+
+      // ── Online (unchanged behaviour) ──
       // Sync elapsed before changing state
       await apiPost(`/api/events/${eventId}/timer`, {
         elapsedSeconds: timerHookRef.current.totalSeconds,
@@ -358,7 +501,11 @@ export function ScoringView() {
     setSyncing(true);
     try {
       await syncTimerToServer();
-      toast.success('Tiempo sincronizado');
+      toast.success(
+        isOfflineRef.current
+          ? 'Tiempo guardado sin conexión — se sincronizará con el servidor'
+          : 'Tiempo sincronizado',
+      );
     } catch {
       toast.error('Error al sincronizar');
     } finally {
@@ -370,6 +517,15 @@ export function ScoringView() {
     async (half: string) => {
       setBusy(true);
       try {
+        // ── Offline: local half + queued timer snapshot (carries the half) ──
+        if (isOfflineRef.current) {
+          const t = timerHookRef.current.totalSeconds;
+          setEvent((prev) => (prev ? { ...prev, currentHalf: half } : prev));
+          await enqueueTimer(eventId, t, half);
+          toast.info('Tiempo cambiado sin conexión — se sincronizará luego');
+          return;
+        }
+
         await apiPost(`/api/events/${eventId}/timer`, {
           elapsedSeconds: timerHookRef.current.totalSeconds,
           half,
@@ -390,6 +546,29 @@ export function ScoringView() {
   const handleEndEvent = useCallback(async () => {
     setBusy(true);
     try {
+      // ── Offline: queue timer + end, update local state, leave ──
+      if (isOfflineRef.current) {
+        const t = timerHookRef.current.totalSeconds;
+        const half = eventRef.current?.currentHalf;
+        await enqueueTimer(eventId, t, half ?? undefined);
+        await enqueueEnd(eventId);
+        setEvent((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'FINISHED',
+                endedAt: new Date().toISOString(),
+                elapsedSeconds: t,
+              }
+            : prev,
+        );
+        setServerElapsed(t);
+        removeTimer(eventId);
+        toast.info('Evento finalizado sin conexión — se sincronizará al recuperar internet');
+        navigate({ page: 'EVENT_LIST' });
+        return;
+      }
+
       await apiPost(`/api/events/${eventId}/timer`, {
         elapsedSeconds: timerHookRef.current.totalSeconds,
         half: eventRef.current?.currentHalf,
@@ -411,6 +590,10 @@ export function ScoringView() {
   /* ── Advance winner to next phase ── */
   const [advancing, setAdvancing] = useState(false);
   const handleAdvanceWinner = useCallback(async () => {
+    if (isOfflineRef.current) {
+      toast.info('Avanzar ganador requiere conexión a internet');
+      return;
+    }
     setAdvancing(true);
     try {
       const res = await apiPost(`/api/events/${eventId}/advance`, {});
@@ -436,6 +619,59 @@ export function ScoringView() {
         const minute = Math.floor(timerHookRef.current.totalSeconds / 60);
         const half = eventRef.current?.currentHalf;
 
+        // ── Offline: queue with client id + optimistic local action ──
+        if (isOfflineRef.current) {
+          const clientId = newActionId();
+          const value = action.defaultValue ?? 1;
+          await enqueueActionCreate(eventId, {
+            id: clientId,
+            playerId,
+            actionType: action.name,
+            actionLabel: action.label,
+            actionIcon: action.icon,
+            actionColor: action.color || '#ffffff',
+            value,
+            minute,
+            half: half ?? null,
+          });
+
+          const ev = eventRef.current;
+          const player = ev
+            ? ev.teamA?.players?.find((p) => p.id === playerId)
+                ? { ...ev.teamA!.players.find((p) => p.id === playerId)!, teamId: ev.teamAId }
+                : ev.teamB?.players?.find((p) => p.id === playerId)
+                  ? { ...ev.teamB!.players.find((p) => p.id === playerId)!, teamId: ev.teamBId }
+                  : undefined
+            : undefined;
+
+          const localAction: EventAction = {
+            id: clientId,
+            eventId,
+            playerId,
+            player,
+            actionType: action.name,
+            actionLabel: action.label,
+            actionIcon: action.icon,
+            actionColor: action.color || '#ffffff',
+            minute,
+            value,
+            half: half ?? null,
+            userId: user?.id ?? '',
+            cardPayment: null,
+            createdAt: new Date().toISOString(),
+            pendingSync: true,
+          };
+          // Server orders actions desc by createdAt → newest first.
+          setEvent((prev) =>
+            prev
+              ? { ...prev, actions: [localAction, ...(prev.actions ?? [])] }
+              : prev,
+          );
+          toast.info('Acción guardada sin conexión — se sincronizará al recuperar internet');
+          return;
+        }
+
+        // ── Online (unchanged behaviour) ──
         // 1. Create action
         await apiPost(`/api/events/${eventId}/actions`, {
           playerId,
@@ -482,7 +718,7 @@ export function ScoringView() {
         setBusy(false);
       }
     },
-    [eventId, canScore, busy, refreshActions],
+    [eventId, canScore, busy, refreshActions, user],
   );
 
   const handleDecrement = useCallback(
@@ -498,6 +734,24 @@ export function ScoringView() {
           toast.error('No hay acción para eliminar');
           return;
         }
+
+        // ── Offline: cancel a pending create, or queue the delete ──
+        if (isOfflineRef.current) {
+          await enqueueActionDelete(eventId, mostRecent.id);
+          setEvent((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  actions: (prev.actions ?? []).filter(
+                    (a) => a.id !== mostRecent.id,
+                  ),
+                }
+              : prev,
+          );
+          toast.info('Acción eliminada sin conexión — se sincronizará al recuperar internet');
+          return;
+        }
+
         await apiDelete(
           `/api/events/${eventId}/actions/${mostRecent.id}`,
         );
@@ -519,10 +773,35 @@ export function ScoringView() {
 
   const handleAddComment = useCallback(
     async (content: string) => {
+      // ── Offline: optimistic local comment + queued op ──
+      if (isOfflineRef.current) {
+        const clientId = newCommentId();
+        await enqueueCommentCreate(eventId, { id: clientId, content });
+        const localComment: Comment = {
+          id: clientId,
+          eventId,
+          content,
+          isAI: false,
+          actionId: null,
+          userId: user?.id ?? null,
+          user: user
+            ? { id: user.id, username: user.username, name: user.name }
+            : null,
+          createdAt: new Date().toISOString(),
+          pendingSync: true,
+        };
+        setEvent((prev) =>
+          prev
+            ? { ...prev, comments: [localComment, ...(prev.comments ?? [])] }
+            : prev,
+        );
+        toast.info('Comentario guardado sin conexión — se sincronizará al recuperar internet');
+        return;
+      }
       await apiPost(`/api/events/${eventId}/comments`, { content });
       await refreshActions();
     },
-    [eventId, refreshActions],
+    [eventId, refreshActions, user],
   );
 
   /* ── Loading state ───────────────────────────────────────────────────── */
@@ -720,7 +999,7 @@ export function ScoringView() {
             className="text-4xl sm:text-5xl font-black tabular-nums leading-none"
             style={{ color: 'var(--text-primary, #fff)' }}
           >
-            {event.scoreA}
+            {scoreADisplay}
           </p>
         </div>
 
@@ -768,7 +1047,7 @@ export function ScoringView() {
             className="text-4xl sm:text-5xl font-black tabular-nums leading-none"
             style={{ color: 'var(--text-primary, #fff)' }}
           >
-            {event.scoreB}
+            {scoreBDisplay}
           </p>
         </div>
       </div>

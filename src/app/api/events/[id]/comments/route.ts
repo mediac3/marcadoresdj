@@ -69,7 +69,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { content } = body;
+    const { id: clientId, content } = body;
 
     if (!content || typeof content !== "string" || content.trim().length === 0) {
       return NextResponse.json(
@@ -78,8 +78,41 @@ export async function POST(
       );
     }
 
+    // Offline sync: an optional client-generated id (uuid) is accepted as
+    // the row's primary key, making replay retries idempotent. If the id
+    // already exists, the original comment is returned (duplicate: true).
+    let commentId: string | undefined;
+    if (clientId !== undefined && clientId !== null) {
+      if (
+        typeof clientId !== "string" ||
+        !/^[A-Za-z0-9_-]{8,64}$/.test(clientId)
+      ) {
+        return NextResponse.json(
+          { error: "id must be a client-generated identifier (8-64 chars)" },
+          { status: 400 }
+        );
+      }
+      commentId = clientId;
+
+      const existing = await db.comment.findFirst({
+        where: { id: clientId, eventId: id },
+        include: {
+          user: {
+            select: { id: true, username: true, name: true },
+          },
+        },
+      });
+      if (existing) {
+        return NextResponse.json(
+          { success: true, comment: existing, duplicate: true },
+          { status: 201 }
+        );
+      }
+    }
+
     const comment = await db.comment.create({
       data: {
+        ...(commentId ? { id: commentId } : {}),
         eventId: id,
         content: content.trim(),
         isAI: false,

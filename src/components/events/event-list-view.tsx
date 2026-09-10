@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -51,8 +51,41 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useAppStore, type SportEvent, type Player } from '@/lib/store';
-import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { apiGet, apiPost, apiDelete, OfflineError } from '@/lib/api';
+import { useOfflineStore } from '@/lib/offline/offline-store';
+import { cacheRead, getCachedRead } from '@/lib/offline/queue';
 import { useToast } from '@/hooks/use-toast';
+
+/* ── Offline warm-up ───────────────────────────────────────────────────────── */
+
+/**
+ * Prefetch each listed event's sport action catalog into the offline
+ * cache (fire-and-forget, only when not cached yet). This lets the
+ * operator open an event's scoring console offline even if that event
+ * was never opened online before.
+ */
+async function warmSportActionCatalogs(events: SportEvent[]): Promise<void> {
+  const sportIds = [
+    ...new Set(events.map((e) => e.sportId).filter(Boolean)),
+  ];
+  await Promise.all(
+    sportIds.map(async (sportId) => {
+      const cacheKey = `sports:${sportId}:actions`;
+      const cached = await getCachedRead<unknown[]>(cacheKey);
+      if (cached && cached.length > 0) return;
+      try {
+        const data = await apiGet<{ success: boolean; actions: unknown[] }>(
+          `/api/sports/${sportId}/actions`,
+        );
+        if (Array.isArray(data.actions)) {
+          await cacheRead(cacheKey, data.actions);
+        }
+      } catch {
+        /* best-effort prefetch */
+      }
+    }),
+  );
+}
 import { EditEventModal } from '@/components/events/edit-event-modal';
 import { ImportEventsModal } from '@/components/events/import-events-modal';
 
@@ -887,9 +920,15 @@ export function EventListView() {
   const isCreatorOrAdmin = useAppStore((s) => s.isCreatorOrAdmin);
   const { toast } = useToast();
 
+  // Offline support: cached list + guarded mutations.
+  const isOnline = useOfflineStore((s) => s.isOnline);
+  const syncVersion = useOfflineStore((s) => s.syncVersion);
+  const isOffline = !isOnline;
+
   const [events, setEvents] = useState<SportEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fromOfflineCache, setFromOfflineCache] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
@@ -914,13 +953,29 @@ export function EventListView() {
   const fetchEvents = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const url = statusFilter === 'ALL'
+      ? '/api/events'
+      : `/api/events?status=${statusFilter}`;
+    const cacheKey = `read:${url}`;
     try {
-      const url = statusFilter === 'ALL'
-        ? '/api/events'
-        : `/api/events?status=${statusFilter}`;
       const res = await apiGet<{ success: boolean; events: SportEvent[] }>(url);
       setEvents(res.events);
+      setFromOfflineCache(false);
+      await cacheRead(cacheKey, res.events);
+      // Warm the offline catalog cache for the listed sports.
+      void warmSportActionCatalogs(res.events);
     } catch (err) {
+      // Offline: serve the last cached list for this filter so the
+      // operator can still find and open their events.
+      if (err instanceof OfflineError) {
+        const cached = await getCachedRead<SportEvent[]>(cacheKey);
+        if (cached) {
+          setEvents(cached);
+          setFromOfflineCache(true);
+          setLoading(false);
+          return;
+        }
+      }
       const msg = err instanceof Error ? err.message : 'Error al cargar eventos';
       setError(msg);
       toast({ title: 'Error', description: msg, variant: 'destructive' });
@@ -932,6 +987,25 @@ export function EventListView() {
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
+
+  // Refresh the list when the connection is restored or right after an
+  // offline sync pass, so the "Sin conexión — lista guardada" state and
+  // stale rows are replaced with fresh server data.
+  const fetchRef = useRef(fetchEvents);
+  fetchRef.current = fetchEvents;
+  const wasOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    const wasOnline = wasOnlineRef.current;
+    wasOnlineRef.current = isOnline;
+    if (isOnline && !wasOnline) {
+      void fetchRef.current();
+    }
+  }, [isOnline]);
+  useEffect(() => {
+    if (syncVersion > 0) {
+      void fetchRef.current();
+    }
+  }, [syncVersion]);
 
   const filteredEvents = useMemo(() => {
     if (!search.trim()) return events;
@@ -964,6 +1038,18 @@ export function EventListView() {
   async function confirmGoLive() {
     if (!goLiveEvent) return;
 
+    // Offline: go straight to the scoring console — the start (and any
+    // actions) will be queued there and synced later.
+    if (isOffline) {
+      toast({
+        title: 'Sin conexión',
+        description: 'Inicia el evento desde el marcador — se guardará y sincronizará luego.',
+      });
+      setGoLiveEvent(null);
+      navigate({ page: 'SCORING', eventId: goLiveEvent.id });
+      return;
+    }
+
     setStartingId(goLiveEvent.id);
     try {
       await apiPost(`/api/events/${goLiveEvent.id}/start`);
@@ -992,6 +1078,17 @@ export function EventListView() {
   async function confirmResume() {
     if (!goLiveEvent) return;
 
+    // Offline: the scoring console queues the resume.
+    if (isOffline) {
+      toast({
+        title: 'Sin conexión',
+        description: 'Reanuda el evento desde el marcador — se sincronizará luego.',
+      });
+      setGoLiveEvent(null);
+      navigate({ page: 'SCORING', eventId: goLiveEvent.id });
+      return;
+    }
+
     setStartingId(goLiveEvent.id);
     try {
       await apiPost(`/api/events/${goLiveEvent.id}/start`);
@@ -1013,11 +1110,25 @@ export function EventListView() {
   }
 
   function handleEditClick(event: SportEvent) {
+    if (isOffline) {
+      toast({
+        title: 'Sin conexión',
+        description: 'Editar eventos requiere conexión a internet.',
+      });
+      return;
+    }
     setEditEvent(event);
     setEditOpen(true);
   }
 
   function handleDeleteClick(event: SportEvent) {
+    if (isOffline) {
+      toast({
+        title: 'Sin conexión',
+        description: 'Eliminar eventos requiere conexión a internet.',
+      });
+      return;
+    }
     setDeleteEvent(event);
   }
 
@@ -1057,11 +1168,32 @@ export function EventListView() {
             Gestiona y sigue todos tus eventos deportivos
           </p>
         </div>
+        {fromOfflineCache && (
+          <span
+            className="inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-[11px] font-medium sm:self-auto"
+            style={{
+              background: 'rgba(245,158,11,0.12)',
+              color: '#fcd34d',
+              border: '1px solid rgba(245,158,11,0.3)',
+            }}
+          >
+            Sin conexión — lista guardada
+          </span>
+        )}
         {isCreatorOrAdmin() && (
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <Button
               variant="outline"
-              onClick={() => setImportOpen(true)}
+              onClick={() => {
+                if (isOffline) {
+                  toast({
+                    title: 'Sin conexión',
+                    description: 'Importar eventos requiere conexión a internet.',
+                  });
+                  return;
+                }
+                setImportOpen(true);
+              }}
               className="h-10 text-sm font-semibold"
               style={{ borderColor: 'var(--border-custom)', color: 'var(--text-secondary)' }}
             >
@@ -1069,7 +1201,16 @@ export function EventListView() {
               <span className="hidden sm:inline">Importar</span>
             </Button>
             <Button
-              onClick={() => navigate({ page: 'CREATE_EVENT' })}
+              onClick={() => {
+                if (isOffline) {
+                  toast({
+                    title: 'Sin conexión',
+                    description: 'Crear eventos requiere conexión a internet.',
+                  });
+                  return;
+                }
+                navigate({ page: 'CREATE_EVENT' });
+              }}
               className="h-10 text-sm font-semibold"
               style={{ background: 'var(--accent)', color: '#fff' }}
             >

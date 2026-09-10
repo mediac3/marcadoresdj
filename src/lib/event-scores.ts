@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { computeScores } from "@/lib/score-computation";
 
 /**
  * Recalculate scores for an event based on all its actions.
@@ -9,9 +10,8 @@ import { db } from "@/lib/db";
  * The player's team determines which side gets the points.
  * OWN_GOAL is special: it contributes to the OPPOSITE team.
  *
- * This approach is fully dynamic — it works for any sport without
- * needing to hardcode action-type lists. The `defaultValue` on
- * SportAction determines how many points each click is worth.
+ * The computation itself lives in `score-computation.ts` (pure, shared
+ * with the offline client); this wrapper loads the data and persists.
  */
 export async function recalculateScores(eventId: string): Promise<{ scoreA: number; scoreB: number }> {
   const event = await db.event.findUnique({
@@ -42,33 +42,12 @@ export async function recalculateScores(eventId: string): Promise<{ scoreA: numb
     },
   });
 
-  let scoreA = 0;
-  let scoreB = 0;
-
-  for (const action of actions) {
-    // Cards don't score
-    if (cardTypes.has(action.actionType)) continue;
-
-    const value = action.value || 1;
-
-    if (action.player) {
-      if (action.actionType === "OWN_GOAL") {
-        // Own goal counts for the OPPOSITE team
-        if (action.player.teamId === event.teamAId) {
-          scoreB += value;
-        } else if (action.player.teamId === event.teamBId) {
-          scoreA += value;
-        }
-      } else {
-        // Regular scoring action - counts for the player's team
-        if (action.player.teamId === event.teamAId) {
-          scoreA += value;
-        } else if (action.player.teamId === event.teamBId) {
-          scoreB += value;
-        }
-      }
-    }
-  }
+  const { scoreA, scoreB } = computeScores({
+    actions,
+    teamAId: event.teamAId,
+    teamBId: event.teamBId,
+    cardTypes,
+  });
 
   await db.event.update({
     where: { id: eventId },

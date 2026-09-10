@@ -53,6 +53,67 @@ function maybeStopInterval() {
 
 /* ── Public API ─────────────────────────────────────────────────────────────── */
 
+/* ── Persistence ───────────────────────────────────────────────────────────── */
+/**
+ * Snapshot running timers to localStorage so the clocks survive a page
+ * reload (including offline reloads, where the server snapshot may be
+ * minutes old). Only written on state changes, never on every tick —
+ * `startedAt` lets the live elapsed time be reconstructed exactly.
+ */
+
+const TIMER_STORAGE_KEY = 'marcadoresdj-timers';
+
+function persistTimers(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const snapshot = Array.from(timers.entries()).map(([eventId, entry]) => ({
+      eventId,
+      elapsedSeconds: entry.elapsedSeconds,
+      isRunning: entry.isRunning,
+      startedAt: entry.startedAt,
+    }));
+    localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Storage full or unavailable — the in-memory timers still work.
+  }
+}
+
+function restoreTimers(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(TIMER_STORAGE_KEY);
+    if (!raw) return;
+    const snapshot = JSON.parse(raw) as Array<{
+      eventId: string;
+      elapsedSeconds: number;
+      isRunning: boolean;
+      startedAt: number;
+    }>;
+    if (!Array.isArray(snapshot)) return;
+    for (const entry of snapshot) {
+      if (
+        typeof entry?.eventId === 'string' &&
+        typeof entry.elapsedSeconds === 'number' &&
+        typeof entry.startedAt === 'number' &&
+        !timers.has(entry.eventId)
+      ) {
+        timers.set(entry.eventId, {
+          elapsedSeconds: entry.elapsedSeconds,
+          isRunning: Boolean(entry.isRunning),
+          startedAt: entry.startedAt,
+        });
+      }
+    }
+    if (timers.size > 0) ensureInterval();
+  } catch {
+    // Corrupted snapshot — start clean.
+  }
+}
+
+if (typeof window !== 'undefined') {
+  restoreTimers();
+}
+
 /**
  * Register or update a timer for a given event.
  * Called when the scoring view mounts or when the timer state changes.
@@ -67,6 +128,7 @@ export function registerTimer(
     isRunning,
     startedAt: Date.now(),
   });
+  persistTimers();
   if (isRunning) ensureInterval();
 }
 
@@ -86,7 +148,9 @@ export function syncTimer(
     entry.startedAt = Date.now();
   } else {
     registerTimer(eventId, elapsedSeconds, isRunning);
+    return;
   }
+  persistTimers();
 }
 
 /**
@@ -108,6 +172,7 @@ export function getTimerElapsed(eventId: string): number {
  */
 export function removeTimer(eventId: string): void {
   timers.delete(eventId);
+  persistTimers();
   maybeStopInterval();
 }
 

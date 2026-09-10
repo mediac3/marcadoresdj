@@ -25,7 +25,8 @@ import {
 } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
 import { useAppStore, type SportEvent } from '@/lib/store';
-import { apiGet } from '@/lib/api';
+import { apiGet, OfflineError } from '@/lib/api';
+import { getCachedEvent } from '@/lib/offline/queue';
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
@@ -389,8 +390,14 @@ export function EventReportView() {
         `/api/events/${eventId}`,
       );
       setEvent(data.event);
-    } catch {
-      // ignore
+    } catch (err) {
+      // Offline fallback: exports are 100% client-side, so a cached
+      // copy still produces a complete report without connection.
+      if (err instanceof OfflineError) {
+        const cached = await getCachedEvent<SportEvent>(eventId);
+        if (cached) setEvent(cached);
+      }
+      // ignore otherwise
     } finally {
       setLoading(false);
     }

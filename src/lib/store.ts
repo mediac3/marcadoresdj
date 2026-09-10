@@ -73,6 +73,8 @@ interface EventAction {
   userId: string;
   cardPayment?: CardPayment | null;
   createdAt: string;
+  /** Client-only flag: action created offline, still queued for sync. */
+  pendingSync?: boolean;
 }
 
 interface CardPayment {
@@ -96,6 +98,8 @@ interface Comment {
   userId: string | null;
   user?: { id: string; username: string; name: string | null } | null;
   createdAt: string;
+  /** Client-only flag: comment created offline, still queued for sync. */
+  pendingSync?: boolean;
 }
 
 interface SportEvent {

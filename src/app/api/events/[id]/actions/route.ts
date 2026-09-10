@@ -75,15 +75,17 @@ export async function POST(
       );
     }
 
-    if (event.status !== "LIVE" && event.status !== "PAUSED") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { error: "Event must be LIVE or PAUSED to add actions" },
+        { error: "Invalid JSON body" },
         { status: 400 }
       );
     }
-
-    const body = await request.json();
     const {
+      id: clientId,
       playerId,
       actionType,
       actionLabel,
@@ -93,6 +95,55 @@ export async function POST(
       minute,
       half,
     } = body;
+
+    // Offline sync: an optional client-generated id (uuid) is accepted as
+    // the row's primary key, making replay retries idempotent. If the id
+    // already exists, the original action is returned (duplicate: true) —
+    // checked BEFORE the status guard so re-syncing an already-applied
+    // queue never duplicates or conflicts after the event finished.
+    let actionId: string | undefined;
+    if (clientId !== undefined && clientId !== null) {
+      if (
+        typeof clientId !== "string" ||
+        !/^[A-Za-z0-9_-]{8,64}$/.test(clientId)
+      ) {
+        return NextResponse.json(
+          { error: "id must be a client-generated identifier (8-64 chars)" },
+          { status: 400 }
+        );
+      }
+      actionId = clientId;
+
+      const existing = await db.eventAction.findFirst({
+        where: { id: clientId, eventId: id },
+        include: {
+          player: {
+            select: {
+              id: true,
+              name: true,
+              number: true,
+              position: true,
+              nickname: true,
+              teamId: true,
+            },
+          },
+        },
+      });
+      if (existing) {
+        const scores = await recalculateScores(id);
+        return NextResponse.json(
+          { success: true, action: existing, scores, duplicate: true },
+          { status: 201 }
+        );
+      }
+    }
+
+    if (event.status !== "LIVE" && event.status !== "PAUSED") {
+      return NextResponse.json(
+        { error: "Event must be LIVE or PAUSED to add actions" },
+        { status: 400 }
+      );
+    }
 
     if (!actionType || !actionLabel || !actionIcon) {
       return NextResponse.json(
@@ -125,6 +176,7 @@ export async function POST(
 
     const action = await db.eventAction.create({
       data: {
+        ...(actionId ? { id: actionId } : {}),
         eventId: id,
         playerId: playerId || null,
         actionType,

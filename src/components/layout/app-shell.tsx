@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { LoginForm } from '@/components/auth/login-form';
 import { ChangePasswordModal } from '@/components/layout/change-password-modal';
+import { ConnectivityBanner } from '@/components/layout/connectivity-banner';
 import { ScoringView } from '@/components/scoring/scoring-view';
 import { TeamsView } from '@/components/teams/teams-view';
 import { TeamDetailView } from '@/components/teams/team-detail-view';
@@ -157,6 +158,32 @@ function ViewRouter() {
   }
 }
 
+/* ── Cached navigation permissions ───────────────────────────────────────── */
+
+// Non-admin navigation depends on /api/my-permissions. Offline (or during
+// an offline reload) that call fails — cache the sections in localStorage
+// so the sidebar (including "Eventos") keeps working without connection.
+const PERMISSIONS_CACHE_KEY = 'marcadoresdj-permissions';
+
+function loadCachedPermissions(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PERMISSIONS_CACHE_KEY);
+    if (!raw) return new Set();
+    const list = JSON.parse(raw) as string[];
+    return Array.isArray(list) ? new Set(list) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCachedPermissions(sections: Set<string>): void {
+  try {
+    localStorage.setItem(PERMISSIONS_CACHE_KEY, JSON.stringify([...sections]));
+  } catch {
+    // Storage unavailable — permissions just won't survive reloads.
+  }
+}
+
 /* ── Main Shell ────────────────────────────────────────────────────────────── */
 
 export function AppShell() {
@@ -174,6 +201,8 @@ export function AppShell() {
   // Fetch user permissions on mount for non-admin users
   useEffect(() => {
     if (!user || user.role === 'ADMIN') return;
+    const cached = loadCachedPermissions();
+
     const token = typeof window !== 'undefined' ? localStorage.getItem('marcadoresdj-token') : null;
     if (!token) return;
     fetch('/api/my-permissions', {
@@ -188,12 +217,23 @@ export function AppShell() {
             if (p.canView) sections.add(p.section);
           }
           setUserPermissions(sections);
+          saveCachedPermissions(sections);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Offline: fall back to the cached sections (if any) so the
+        // sidebar — including "Eventos" — keeps working without connection.
+        if (cached.size > 0) setUserPermissions(cached);
+      });
   }, [user]);
 
   const handleLogout = useCallback(() => {
+    // Cached permissions belong to the outgoing user.
+    try {
+      localStorage.removeItem(PERMISSIONS_CACHE_KEY);
+    } catch {
+      /* ignore */
+    }
     logout();
   }, [logout]);
 
@@ -241,6 +281,9 @@ export function AppShell() {
       className="flex min-h-screen flex-col"
       style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
     >
+      {/* ── Offline connectivity ribbon (only when offline / pending sync) ── */}
+      <ConnectivityBanner />
+
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header
         className="sticky top-0 z-40 flex h-14 items-center justify-between border-b px-4"

@@ -1,4 +1,18 @@
+import { reportFetchFailure } from '@/lib/offline/connection';
+
 const TOKEN_KEY = 'marcadoresdj-token';
+
+/**
+ * Thrown when a request fails at the network level (no response at all),
+ * e.g. because the internet connection was lost. Distinct from HTTP
+ * errors (4xx/5xx), which DO produce a server response.
+ */
+export class OfflineError extends Error {
+  constructor(message = 'Sin conexión a internet') {
+    super(message);
+    this.name = 'OfflineError';
+  }
+}
 
 /**
  * Core fetch wrapper that automatically attaches the JWT token
@@ -20,7 +34,15 @@ export async function apiFetch<T = unknown>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(path, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(path, { ...options, headers });
+  } catch {
+    // Network-level failure (offline, DNS, server unreachable): notify
+    // the connectivity monitor for a fast verified check.
+    reportFetchFailure();
+    throw new OfflineError();
+  }
 
   // Handle 204 No Content
   if (res.status === 204) {

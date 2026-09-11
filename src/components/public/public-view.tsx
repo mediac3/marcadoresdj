@@ -27,6 +27,9 @@ import {
   GitBranch,
   Target,
   Plus,
+  Crown,
+  Loader2,
+  TrendingUp,
 } from 'lucide-react';
 import { LocationSelector } from '@/components/locations/location-selector';
 import {
@@ -53,6 +56,8 @@ import {
 } from '@/components/ui/popover';
 import { useAppStore, type ThemeName } from '@/lib/store';
 import { GOAL_ACTION_TYPES, normalizeSportKey } from '@/lib/constants';
+import { sportHasDraws, type PredictionResult } from '@/lib/prediction';
+import type { MvpResult, MvpEntry } from '@/lib/mvp';
 import { PublicEventWizard } from '@/components/public/public-event-wizard';
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -190,7 +195,12 @@ interface ExpandedData {
   teamBName: string;
   sportName: string;
   streamingUrl: string | null;
+  mvp: MvpResult | null;
 }
+
+/* ── Win/Draw/Win (1X2) visitor pick ── */
+type WinDrawWinPick = 'A' | 'DRAW' | 'B';
+const PICKS_STORAGE_KEY = 'marcadoresdj-picks';
 
 /* ════════════════════════════════════════════════════════════════════════════
    CONSTANTS
@@ -369,6 +379,16 @@ function getTeamLabel(
   return team.name;
 }
 
+/**
+ * Short team label for the 1X2 odds buttons: the meaningful part of the name
+ * (before a "-" or "(" marker, e.g. "España-Mas(7A)" → "España"). The stored
+ * shortName is ignored because legacy data contains truncated values.
+ */
+function oddsShortLabel(name: string): string {
+  const base = name.split(/[-(]/)[0]?.trim() || name;
+  return base.length > 12 ? `${base.slice(0, 12)}…` : base;
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    PLAYER POPOVER
    ════════════════════════════════════════════════════════════════════════════ */
@@ -376,9 +396,11 @@ function getTeamLabel(
 function PlayerPopover({
   player,
   teamName,
+  avatarSize = 36,
 }: {
   player: PlayerDetail;
   teamName: string;
+  avatarSize?: number;
 }) {
   return (
     <Popover>
@@ -388,7 +410,7 @@ function PlayerPopover({
           className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-[var(--accent)] transition-all focus:outline-none focus:ring-[var(--accent)]"
           aria-label={`Ver perfil de ${player.name}`}
         >
-          <Avatar className="size-9">
+          <Avatar style={{ width: avatarSize, height: avatarSize }}>
             {player.photo ? (
               <AvatarImage src={player.photo} alt={player.name} />
             ) : null}
@@ -484,6 +506,397 @@ function PlayerPopover({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   WIN / DRAW / WIN ODDS ROW (Gana – Empata – Gana)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+function OddsRow({
+  teamALabel,
+  teamBLabel,
+  hasDraws,
+  prediction,
+  loading,
+  picked,
+  onPick,
+}: {
+  teamALabel: string;
+  teamBLabel: string;
+  hasDraws: boolean;
+  prediction: PredictionResult | null;
+  loading: boolean;
+  picked?: WinDrawWinPick;
+  onPick: (outcome: WinDrawWinPick) => void;
+}) {
+  const outcomes: Array<{ key: WinDrawWinPick; label: string; prob: number | null }> = [
+    { key: 'A', label: `Gana ${teamALabel}`, prob: prediction ? prediction.probA : null },
+    ...(hasDraws
+      ? [{ key: 'DRAW' as const, label: 'Empata', prob: prediction ? prediction.probDraw : null }]
+      : []),
+    { key: 'B', label: `Gana ${teamBLabel}`, prob: prediction ? prediction.probB : null },
+  ];
+
+  return (
+    <div className="flex gap-1.5 w-full" role="group" aria-label="Probabilidades del partido">
+      {outcomes.map((o) => {
+        const isSelected = picked === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPick(o.key);
+            }}
+            aria-pressed={isSelected}
+            className="flex-1 min-h-[44px] rounded-lg flex flex-col items-center justify-center gap-1 px-1.5 py-1.5 transition-all cursor-pointer border"
+            style={{
+              background: isSelected ? 'var(--accent)' : 'var(--bg-secondary)',
+              color: isSelected ? '#fff' : 'var(--text-secondary)',
+              borderColor: isSelected ? 'var(--accent)' : 'var(--border-custom)',
+            }}
+          >
+            <span className="text-[10px] font-bold leading-none truncate max-w-full">
+              {o.label}
+            </span>
+            {loading && !prediction ? (
+              <Loader2 className="size-3 animate-spin" aria-label="Analizando" />
+            ) : o.prob != null ? (
+              <span
+                className={`text-xs font-black tabular-nums leading-none ${isSelected ? 'text-white' : ''}`}
+                style={isSelected ? undefined : { color: 'var(--text-primary)' }}
+              >
+                {Math.round(o.prob * 100)}%
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MVP SECTION — Jugador del Partido
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/** Maps an MVP entry to the PlayerDetail shape required by PlayerPopover. */
+function mvpEntryToPlayerDetail(entry: MvpEntry): PlayerDetail {
+  return {
+    id: entry.playerId,
+    name: entry.playerName,
+    number: entry.playerNumber ?? 0,
+    position: entry.playerPosition ?? '',
+    nickname: entry.playerNickname,
+    photo: entry.playerPhoto,
+    birthDate: entry.playerBirthDate,
+    nationality: entry.playerNationality,
+    height: entry.playerHeight,
+    weight: entry.playerWeight,
+    teamId: entry.teamId,
+  };
+}
+
+function MvpBreakdownChips({ breakdown }: { breakdown: MvpEntry['breakdown'] }) {
+  const chips: string[] = [];
+  if (breakdown.goals > 0) chips.push(`⚽ ${breakdown.goals}`);
+  if (breakdown.ownGoals > 0) chips.push(`🎬 ${breakdown.ownGoals} autogol${breakdown.ownGoals > 1 ? 'es' : ''}`);
+  if (breakdown.yellowCards > 0) chips.push(`🟨 ${breakdown.yellowCards}`);
+  if (breakdown.blueCards > 0) chips.push(`🟦 ${breakdown.blueCards}`);
+  if (breakdown.redCards > 0) chips.push(`🟥 ${breakdown.redCards}`);
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {chips.map((c) => (
+        <span
+          key={c}
+          className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+          style={{ background: 'var(--bg-card)', color: 'var(--text-secondary)' }}
+        >
+          {c}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function MvpSection({
+  mvp,
+  teamAId,
+  teamAName,
+  teamBName,
+}: {
+  mvp: MvpResult;
+  teamAId: string;
+  teamAName: string;
+  teamBName: string;
+}) {
+  const teamNameOf = (teamId: string) =>
+    teamId === teamAId ? teamAName : teamBName;
+  const runnersUp = mvp.podium.filter((p) => p.playerId !== mvp.mvp.playerId);
+
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-custom)' }}>
+      <div className="px-4 py-2 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-custom)' }}>
+        <div className="flex items-center gap-2">
+          <Crown className="size-4" style={{ color: '#fbbf24' }} aria-hidden="true" />
+          <h4 className="text-xs font-bold uppercase tracking-wider m-0" style={{ color: 'var(--text-muted)' }}>
+            Jugador del Partido
+          </h4>
+        </div>
+        <span
+          className="text-[10px] font-bold px-2 py-0.5 rounded-full tabular-nums"
+          style={{ background: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24' }}
+        >
+          ★ {mvp.mvp.rating.toFixed(1)}
+        </span>
+      </div>
+      <div className="p-4 space-y-3">
+        {/* Hero */}
+        <div className="flex items-center gap-3">
+          <PlayerPopover
+            player={mvpEntryToPlayerDetail(mvp.mvp)}
+            teamName={teamNameOf(mvp.mvp.teamId)}
+            avatarSize={56}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="font-extrabold text-sm sm:text-base truncate m-0" style={{ color: 'var(--text-primary)' }}>
+              {mvp.mvp.playerName}
+            </p>
+            <p className="text-xs font-medium truncate m-0 mt-0.5" style={{ color: 'var(--accent)' }}>
+              {teamNameOf(mvp.mvp.teamId)}
+              {mvp.mvp.playerNumber != null && ` · #${mvp.mvp.playerNumber}`}
+            </p>
+            <div className="mt-1.5">
+              <MvpBreakdownChips breakdown={mvp.mvp.breakdown} />
+            </div>
+          </div>
+        </div>
+        {/* Podium runners-up */}
+        {runnersUp.length > 0 && (
+          <div className="space-y-1 pt-1" style={{ borderTop: '1px dashed var(--border-custom)' }}>
+            {runnersUp.map((p, idx) => (
+              <div key={p.playerId} className="flex items-center gap-2 text-xs">
+                <span aria-hidden="true">{idx === 0 ? '🥈' : '🥉'}</span>
+                <span className="font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                  {p.playerName}
+                </span>
+                <span className="truncate" style={{ color: 'var(--text-muted)' }}>
+                  {teamNameOf(p.teamId)}
+                </span>
+                <span className="ml-auto shrink-0 text-[10px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                  ★ {p.rating.toFixed(1)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PREDICTION SECTION — Análisis de probabilidades (Dixon-Coles)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+const FORM_LABELS: Record<'W' | 'D' | 'L', string> = { W: 'V', D: 'E', L: 'D' };
+const FORM_STYLES: Record<'W' | 'D' | 'L', { background: string; color: string }> = {
+  W: { background: 'rgba(34, 197, 94, 0.18)', color: '#22c55e' },
+  D: { background: 'rgba(148, 163, 184, 0.18)', color: '#94a3b8' },
+  L: { background: 'rgba(239, 68, 68, 0.18)', color: '#ef4444' },
+};
+
+function FormChips({ form }: { form: ('W' | 'D' | 'L')[] }) {
+  if (form.length === 0) {
+    return (
+      <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+        Sin historial
+      </span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1">
+      {form.map((f, i) => (
+        <span
+          key={i}
+          className="inline-flex items-center justify-center size-[18px] rounded text-[9px] font-black"
+          style={FORM_STYLES[f]}
+          title={f === 'W' ? 'Victoria' : f === 'D' ? 'Empate' : 'Derrota'}
+        >
+          {FORM_LABELS[f]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ProbabilityBar({ label, prob, highlight }: { label: string; prob: number; highlight: boolean }) {
+  const pct = Math.round(prob * 100);
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold w-[38%] truncate text-right" style={{ color: 'var(--text-secondary)' }}>
+        {label}
+      </span>
+      <div className="flex-1 h-2.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-card)' }}>
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, background: highlight ? 'var(--accent)' : 'rgba(148, 163, 184, 0.55)' }}
+        />
+      </div>
+      <span className="text-xs font-black tabular-nums w-9 text-right" style={{ color: highlight ? 'var(--accent)' : 'var(--text-primary)' }}>
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+function TeamStatsMini({
+  teamName,
+  stats,
+}: {
+  teamName: string;
+  stats: PredictionResult['teamA'];
+}) {
+  return (
+    <div className="rounded-lg p-2.5 space-y-1.5" style={{ background: 'var(--bg-card)' }}>
+      <p className="text-[10px] font-bold uppercase truncate m-0" style={{ color: 'var(--accent)' }}>
+        {teamName}
+      </p>
+      <FormChips form={stats.form} />
+      <div className="grid grid-cols-4 gap-x-2 text-[10px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+        <span title="Partidos jugados">PJ {stats.played}</span>
+        <span title="Victorias" style={{ color: 'var(--score-green)' }}>V {stats.won}</span>
+        <span title="Empates">E {stats.drawn}</span>
+        <span title="Derrotas" style={{ color: 'var(--accent-red)' }}>D {stats.lost}</span>
+      </div>
+      <p className="text-[10px] tabular-nums m-0" style={{ color: 'var(--text-muted)' }}>
+        GF/GC {stats.goalsFor}/{stats.goalsAgainst} · prom {stats.avgGoalsFor.toFixed(1)}/{stats.avgGoalsAgainst.toFixed(1)}
+      </p>
+    </div>
+  );
+}
+
+function PredictionSection({
+  sportName,
+  teamAName,
+  teamBName,
+  prediction,
+  loading,
+  pick,
+  onPick,
+}: {
+  sportName: string;
+  teamAName: string;
+  teamBName: string;
+  prediction: PredictionResult | null;
+  loading: boolean;
+  pick?: WinDrawWinPick;
+  onPick: (outcome: WinDrawWinPick) => void;
+}) {
+  const hasDraws = sportHasDraws(sportName);
+  const pickLabel =
+    pick === 'A' ? `Gana ${teamAName}` : pick === 'B' ? `Gana ${teamBName}` : pick === 'DRAW' ? 'Empate' : null;
+
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-custom)' }}>
+      <div className="px-4 py-2 flex items-center justify-between gap-2" style={{ borderBottom: '1px solid var(--border-custom)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <TrendingUp className="size-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+          <h4 className="text-xs font-bold uppercase tracking-wider m-0 truncate" style={{ color: 'var(--text-muted)' }}>
+            ¿Quién gana?
+          </h4>
+        </div>
+        {prediction && (
+          <span
+            className="text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
+            style={{ background: 'var(--bg-card)', color: 'var(--text-secondary)' }}
+            title="Modelo estadístico aplicado"
+          >
+            {prediction.model === 'dixon-coles' ? 'Dixon-Coles' : 'Dif. Normal'}
+          </span>
+        )}
+      </div>
+      <div className="p-4 space-y-3">
+        <OddsRow
+          teamALabel={oddsShortLabel(teamAName)}
+          teamBLabel={oddsShortLabel(teamBName)}
+          hasDraws={hasDraws}
+          prediction={prediction}
+          loading={loading}
+          picked={pick}
+          onPick={onPick}
+        />
+        {loading && !prediction ? (
+          <div className="flex items-center justify-center gap-2 py-3" style={{ color: 'var(--text-muted)' }}>
+            <Loader2 className="size-4 animate-spin" />
+            <span className="text-xs">Analizando el historial de ambos equipos…</span>
+          </div>
+        ) : prediction ? (
+          <>
+            {/* Probability bars */}
+            <div className="space-y-1.5">
+              <ProbabilityBar label={teamAName} prob={prediction.probA} highlight={pick === 'A'} />
+              {hasDraws && <ProbabilityBar label="Empate" prob={prediction.probDraw} highlight={pick === 'DRAW'} />}
+              <ProbabilityBar label={teamBName} prob={prediction.probB} highlight={pick === 'B'} />
+            </div>
+
+            {/* Expected score + live badge */}
+            <div className="flex items-center justify-center gap-2 flex-wrap text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+              <span className="tabular-nums">
+                Marcador esperado{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>
+                  {prediction.expectedGoalsA} – {prediction.expectedGoalsB}
+                </strong>
+              </span>
+              {prediction.live && (
+                <span
+                  className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
+                  style={{ background: 'rgba(239, 68, 68, 0.12)', color: 'var(--accent-red)' }}
+                >
+                  <span className="inline-block size-1.5 rounded-full animate-pulse" style={{ background: 'var(--live-dot)' }} />
+                  Ajustado al marcador y tiempo
+                </span>
+              )}
+            </div>
+
+            {/* Team stats */}
+            <div className="grid grid-cols-2 gap-2">
+              <TeamStatsMini teamName={teamAName} stats={prediction.teamA} />
+              <TeamStatsMini teamName={teamBName} stats={prediction.teamB} />
+            </div>
+
+            {/* Footer */}
+            <div className="space-y-1">
+              {pickLabel && (
+                <p className="text-[10px] font-semibold m-0" style={{ color: 'var(--accent)' }}>
+                  Tu pronóstico: {pickLabel}
+                </p>
+              )}
+              {prediction.insufficientData ? (
+                <p className="text-[10px] m-0" style={{ color: 'var(--accent-yellow)' }}>
+                  Sin historial registrado: probabilidades neutras basadas en el promedio del deporte.
+                </p>
+              ) : (
+                <p className="text-[10px] m-0" style={{ color: 'var(--text-muted)' }}>
+                  Basado en {prediction.teamA.played + prediction.teamB.played} partidos previos · Confiabilidad{' '}
+                  {prediction.confidence === 'ALTA' ? 'alta' : prediction.confidence === 'MEDIA' ? 'media' : 'baja'}.
+                </p>
+              )}
+              <p className="text-[9px] m-0" style={{ color: 'var(--text-muted)', opacity: 0.8 }}>
+                Modelo estadístico Dixon-Coles sobre partidos finalizados (ponderado por recencia). Solo con fines informativos.
+              </p>
+            </div>
+          </>
+        ) : (
+          <p className="text-[11px] text-center m-0" style={{ color: 'var(--text-muted)' }}>
+            Elige un resultado para analizar las probabilidades según el historial de cada equipo.
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -613,6 +1026,10 @@ function EventCard({
   selectionMode,
   selected,
   onToggleSelect,
+  prediction,
+  predictionLoading,
+  pick,
+  onOddsPick,
 }: {
   event: PublicEvent;
   isExpanded: boolean;
@@ -621,6 +1038,10 @@ function EventCard({
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
+  prediction?: PredictionResult | null;
+  predictionLoading?: boolean;
+  pick?: WinDrawWinPick;
+  onOddsPick?: (eventId: string, outcome: WinDrawWinPick) => void;
 }) {
   const isLive = event.status === 'LIVE';
   const isPaused = event.status === 'PAUSED';
@@ -628,6 +1049,14 @@ function EventCard({
 
   const teamA = event.teamA;
   const teamB = event.teamB;
+
+  // 1X2 row: visible for upcoming/live events outside selection mode and
+  // hidden while the card is expanded (the panel shows the full analysis).
+  const showOdds =
+    !selectionMode &&
+    !isExpanded &&
+    !!onOddsPick &&
+    (event.status === 'SCHEDULED' || isLive || isPaused);
 
   return (
     <div
@@ -743,6 +1172,19 @@ function EventCard({
           )}
         </div>
       </button>
+      {showOdds && (
+        <div className="px-3 pb-3 pt-1">
+          <OddsRow
+            teamALabel={oddsShortLabel(teamA?.name ?? '')}
+            teamBLabel={oddsShortLabel(teamB?.name ?? '')}
+            hasDraws={sportHasDraws(event.sport?.name ?? '')}
+            prediction={prediction ?? null}
+            loading={!!predictionLoading}
+            picked={pick}
+            onPick={(outcome) => onOddsPick?.(event.id, outcome)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -753,9 +1195,12 @@ function EventCard({
 
 function ExpandedEventPanel({
   event, expandedData, expandedLoading, liveElapsed, onClose, fingerprint,
+  prediction, predictionLoading, pick, onOddsPick,
 }: {
   event: PublicEvent; expandedData: ExpandedData | null; expandedLoading: boolean;
   liveElapsed: number | null; onClose: () => void; fingerprint: string;
+  prediction?: PredictionResult | null; predictionLoading?: boolean;
+  pick?: WinDrawWinPick; onOddsPick?: (eventId: string, outcome: WinDrawWinPick) => void;
 }) {
   const eventAds = useLocationAds(event.city?.id, !!expandedData?.streamingUrl);
   const commentsEndRef = useRef<HTMLDivElement>(null);
@@ -793,6 +1238,11 @@ function ExpandedEventPanel({
   }, [expandedData]);
 
   const eventName = event.name || (event.teamA && event.teamB ? `${event.teamA.name} vs ${event.teamB.name}` : '\u2014');
+
+  // 1X2 analysis is meaningful before/during the match only.
+  const showPredictionSection =
+    !!onOddsPick &&
+    (event.status === 'SCHEDULED' || event.status === 'LIVE' || event.status === 'PAUSED');
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-custom)', boxShadow: 'var(--shadow)' }}>
@@ -851,6 +1301,25 @@ function ExpandedEventPanel({
                 </div>
               </div>
             </div>
+            {expandedData.mvp && (
+              <MvpSection
+                mvp={expandedData.mvp}
+                teamAId={expandedData.teamAId}
+                teamAName={expandedData.teamAName}
+                teamBName={expandedData.teamBName}
+              />
+            )}
+            {showPredictionSection && (
+              <PredictionSection
+                sportName={expandedData.sportName}
+                teamAName={expandedData.teamAName}
+                teamBName={expandedData.teamBName}
+                prediction={prediction ?? null}
+                loading={!!predictionLoading}
+                pick={pick}
+                onPick={(outcome) => onOddsPick?.(event.id, outcome)}
+              />
+            )}
             {expandedData.streamingUrl && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
@@ -1781,6 +2250,26 @@ export function PublicView() {
   const [openTournaments, setOpenTournaments] = useState<Set<string>>(new Set());
   const expandedDataRef = useRef<ExpandedData | null>(null);
 
+  /* ── Win/Draw/Win predictions & visitor picks ── */
+  const [predictions, setPredictions] = useState<Record<string, PredictionResult>>({});
+  const [predictionLoading, setPredictionLoading] = useState<Record<string, boolean>>({});
+  const [picks, setPicks] = useState<Record<string, WinDrawWinPick>>({});
+  const predictionsRef = useRef<Record<string, PredictionResult>>({});
+  const predictionLoadingRef = useRef<Record<string, boolean>>({});
+  const predictionFetchedAtRef = useRef<Record<string, number>>({});
+
+  // Hydrate visitor picks from localStorage (favorites-like persistence).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PICKS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') setPicks(parsed as Record<string, WinDrawWinPick>);
+    } catch {
+      // corrupted storage — start fresh
+    }
+  }, []);
+
   /* ── Derived: expanded event from full events array (survives pagination) ── */
   const expandedEvent = useMemo(
     () => (expandedId ? events.find((e) => e.id === expandedId) ?? null : null),
@@ -2076,6 +2565,7 @@ export function PublicView() {
           teamAName: (evt.teamA as Record<string, unknown>)?.name as string ?? '—',
           teamBName: (evt.teamB as Record<string, unknown>)?.name as string ?? '—',
           sportName: (evt.sport as Record<string, unknown>)?.name as string ?? '',
+          mvp: (detailData.mvp as MvpResult | undefined) ?? null,
         };
         expandedDataRef.current = newExpanded;
         setExpandedData(newExpanded);
@@ -2160,6 +2650,66 @@ export function PublicView() {
     },
     [expandedId, fetchExpanded],
   );
+
+  /* ── Fetch 1X2 prediction (cached; shorter TTL while live) ── */
+  const fetchPrediction = useCallback(async (eventId: string, isLive: boolean) => {
+    const ttl = isLive ? 60_000 : 5 * 60_000;
+    const fresh =
+      predictionsRef.current[eventId] != null &&
+      Date.now() - (predictionFetchedAtRef.current[eventId] ?? 0) < ttl;
+    if (fresh || predictionLoadingRef.current[eventId]) return;
+    predictionLoadingRef.current[eventId] = true;
+    setPredictionLoading((prev) => ({ ...prev, [eventId]: true }));
+    try {
+      const res = await fetch(`/api/public/events/${eventId}/prediction`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.prediction) {
+          predictionsRef.current[eventId] = data.prediction;
+          predictionFetchedAtRef.current[eventId] = Date.now();
+          setPredictions((prev) => ({ ...prev, [eventId]: data.prediction }));
+        }
+      }
+    } catch {
+      // silently ignore (offline-tolerant)
+    } finally {
+      predictionLoadingRef.current[eventId] = false;
+      setPredictionLoading((prev) => ({ ...prev, [eventId]: false }));
+    }
+  }, []);
+
+  /* ── Odds click: pick + expand the event + fetch analysis ── */
+  const handleOddsPick = useCallback(
+    (eventId: string, outcome: WinDrawWinPick) => {
+      setPicks((prev) => {
+        const next = { ...prev, [eventId]: outcome };
+        try {
+          localStorage.setItem(PICKS_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // storage unavailable — pick stays in memory
+        }
+        return next;
+      });
+      if (expandedId !== eventId) {
+        setExpandedId(eventId);
+        setExpandedData(null);
+        expandedDataRef.current = null;
+        fetchExpanded(eventId);
+      }
+      const evt = events.find((e) => e.id === eventId);
+      fetchPrediction(eventId, evt?.status === 'LIVE' || evt?.status === 'PAUSED');
+    },
+    [expandedId, events, fetchExpanded, fetchPrediction],
+  );
+
+  /* ── Keep the prediction fresh while a live event panel is open ── */
+  useEffect(() => {
+    if (!expandedId) return;
+    const evt = events.find((e) => e.id === expandedId);
+    if (evt && (evt.status === 'LIVE' || evt.status === 'PAUSED')) {
+      fetchPrediction(expandedId, true);
+    }
+  }, [expandedId, events, fetchPrediction]);
 
   /* ── Toggle tournament collapse (collapsed by default; click to open) ── */
   const toggleTournament = useCallback((tournamentId: string) => {
@@ -2578,6 +3128,10 @@ export function PublicView() {
               liveElapsed={expandedEvent.status === 'LIVE' ? getLiveElapsed(expandedEvent) : null}
               onClose={() => handleToggle(expandedEvent.id)}
               fingerprint={fingerprint}
+              prediction={predictions[expandedEvent.id]}
+              predictionLoading={!!predictionLoading[expandedEvent.id]}
+              pick={picks[expandedEvent.id]}
+              onOddsPick={handleOddsPick}
             />
           </div>
         </div>
@@ -2707,6 +3261,10 @@ export function PublicView() {
                       selectionMode={selectionMode}
                       selected={selectedIds.has(evt.id)}
                       onToggleSelect={toggleSelect}
+                      prediction={predictions[evt.id]}
+                      predictionLoading={!!predictionLoading[evt.id]}
+                      pick={picks[evt.id]}
+                      onOddsPick={handleOddsPick}
                     />
                   ))}
                 </div>
@@ -2777,6 +3335,10 @@ export function PublicView() {
                   selectionMode={selectionMode}
                   selected={selectedIds.has(evt.id)}
                   onToggleSelect={toggleSelect}
+                  prediction={predictions[evt.id]}
+                  predictionLoading={!!predictionLoading[evt.id]}
+                  pick={picks[evt.id]}
+                  onOddsPick={handleOddsPick}
                 />
               ))}
             </div>
